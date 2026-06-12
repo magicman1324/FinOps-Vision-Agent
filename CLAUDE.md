@@ -44,95 +44,102 @@ Skills 位于 `.claude/skills/` 目录，每个 skill 有独立的 `SKILL.md` �
 
 ## 项目概述
 
-**AI 视觉对话助手** — 七牛云 Hackathon 项目，基于 FastAPI + WebSocket + HTML5 的端云协同实时视觉对话应用。
+**AI 视觉对话助手** — 七牛云 Hackathon 项目，FastAPI + WebSocket + HTML5 端云协同实时视觉对话应用。
 
-用户打开摄像头与麦克风，AI 能看到摄像头画面、听到用户说话，并给予语音回应。核心考核维度：视觉理解准确性、语音交互自然度、端云协同成本控制（FinOps）。
+用户打开摄像头与麦克风，AI 看到画面、听到语音，并给予语音回应。
+
+### 运行命令
+
+```bash
+# 安装依赖
+pip install -r server/requirements.txt
+
+# 启动后端
+uvicorn server.main:app --host 127.0.0.1 --port 8765
+
+# 启动前端（直接打开浏览器）
+# 打开 client/index.html
+
+# 跑全部 mock 测试（不需要 API Key）
+pytest tests/ -v --ignore=tests/test_live.py
+
+# 跑单个测试文件
+pytest tests/test_ws.py -v
+
+# 跑单个测试函数
+pytest tests/test_ws.py::test_audio_pipeline -v
+
+# 跑真实 API 测试（需要 DASHSCOPE_API_KEY 环境变量）
+DASHSCOPE_API_KEY=sk-xxx pytest tests/test_live.py -v
+```
 
 ### 技术栈
 
-- **前端（端侧）：** 纯 HTML5 + JavaScript，WebRTC 捕获音视频，VAD + Ring Buffer 端侧语音处理，1 帧截图
-- **后端（云侧）：** Python + FastAPI + WebSocket，全双工通信，流式推理调度
-- **AI 引擎：** DashScope ASR（通义听悟）→ 双层意图路由 → Qwen-VL-Max / DeepSeek-V3 → CosyVoice TTS
+- **前端：** 纯 HTML5 + JavaScript，getUserMedia 捕获音视频，RMS 能量 VAD + 环形缓冲区
+- **后端：** Python + FastAPI + WebSocket，全双工通信
+- **AI 引擎：** DashScope ASR（通义听悟 paraformer-realtime-v2）→ CosyVoice TTS v2 流式合成
+- **测试：** pytest + pytest-asyncio，asyncio_mode=auto
+- **CI：** GitHub Actions ubuntu-latest，unit job（每次 push/PR）+ live job（仅 PR，需 secret）
 
-### 核心创新点
+### 已实现 vs 计划中
 
-1. **端侧 VAD + Ring Buffer**：浏览器端 WebAssembly VAD 做静音检测，环形缓冲区回溯 300ms 保证首字不丢失，拦截 60%+ 无效音频传输
-2. **双层意图路由**：L0 端侧关键词正则（免费，80% 命中率）+ L1 DeepSeek-V3 分类（低成本兜底），VLM 仅处理强视觉场景，综合 Token 成本压缩 85%
-3. **全链路流式 + 语义分块**：ASR Stream → VLM Stream → TTS Stream，以句号/问号为自然边界分块而非逗号切分，TTFB < 800ms
-4. **三层渐进式语义压缩（差异化杀手）**：短窗口完整保留（3 轮）→ 中窗口结构化摘要（4-10 轮）→ 远距元摘要（11 轮+），跨轮指代消解同时 Context 仅增长 30%
+| 已实现 | 计划中 |
+|--------|--------|
+| `server/main.py` WebSocket ASR→TTS 管线 | `server/vlm.py` Qwen-VL-Max 视觉推理 |
+| `server/asr.py` DashScope 通义听悟 | `server/llm.py` DeepSeek-V3 纯文本 |
+| `server/tts.py` CosyVoice 流式 TTS | `server/router.py` L0/L1 双层意图路由 |
+| `server/config.py` 环境变量配置 | `server/memory.py` 三层语义压缩 |
+| `client/index.html` 摄像头+状态栏+日志 | `client/websocket.js` WebSocket 通信（当前为 stub） |
+| `client/vad.js` RMS VAD + 3s Ring Buffer | `docs/design.md` 设计文档 |
 
-### 项目结构
+### 核心架构模式
 
-```text
-├── server/                  # FastAPI 后端
-│   ├── main.py              # WebSocket 入口、路由注册
-│   ├── asr.py               # DashScope 通义听悟 ASR 封装
-│   ├── vlm.py               # Qwen-VL-Max 视觉推理 + stream
-│   ├── llm.py               # DeepSeek-V3 纯文本推理
-│   ├── tts.py               # CosyVoice 流式 TTS
-│   ├── router.py            # 双层意图路由（L0 正则 + L1 LLM）
-│   ├── memory.py            # 三层渐进式语义压缩上下文管理
-│   └── requirements.txt
-├── client/                  # 前端
-│   ├── index.html           # 主页面：摄像头预览 + 对话气泡 + 状态指示
-│   ├── vad.js               # VAD + Ring Buffer 端侧语音处理
-│   └── websocket.js         # WebSocket 通信、1 帧截图、音频播放
-└── docs/
-    └── design.md            # 设计文档（用户故事、FinOps、模型选择）
-```
+**TTS 回调→async generator 桥接** (`server/tts.py`)：
+DashScope TTS v2 使用同步回调 `ResultCallback.on_data(bytes)` 交付音频。通过 `asyncio.Queue` 将回调解耦为 `async for chunk in text_to_speech_stream(text)` 的流式生成器。
 
-### 50 小时 MVP 范围
+**ASR 回调收集** (`server/asr.py`)：
+`RecognitionCallback.on_event(RecognitionResult)` 逐句收集文本，`call()` 结束后返回拼接结果。
 
-| 做 | 不做 |
-|----|------|
-| WebRTC 音视频捕获、VAD+Ring Buffer、1 帧截图 | 全双工打断、图像模糊度检测 |
-| 双层意图路由、流式 VLM/LLM/TTS | 多模型并发 fallback |
-| 三层语义压缩记忆、轮次上下文 | 持久化存储、跨会话记忆 |
-| 每个 API 调用降级提示 | 自动重试、熔断器 |
-
-## 编码规范
-
-### Python 后端规范
-
-- WebSocket 路由统一在 `main.py` 注册，业务逻辑收敛到各模块
-- 每个 AI API 调用必须 try/catch，失败时返回用户友好降级消息
-- 流式生成器函数统一使用 `async def` + `yield` 模式
-- API Key 等敏感信息走环境变量 `os.getenv()`，禁止硬编码
-- 日志使用 `logging` 模块，关键节点（ASR 耗时、VLM Token 消耗、路由决策）必须打点
-
-### 前端规范
-
-- UI 极简：摄像头预览 + 对话气泡 + 底部状态指示器，无动画、无主题
-- VAD 参数（静音阈值、超时时间）抽为常量，方便调参
-- 图片压缩统一 512x512，质量 0.7，压缩逻辑封装为独立函数
-- WebSocket 断连时显示红色状态指示器，自动尝试重连（指数退避，最多 3 次）
+**VAD 能量检测** (`client/vad.js`)：
+RMS 阈值 + 连续帧计数判定语音起止。`start` 时从环形缓冲区回溯 300ms，`end`（静音 >1.5s）触发 `onSpeechEnd(pcmFloat32Array)` 回调。
 
 ### WebSocket 消息协议
 
-```json
-// 前端 → 后端
-{
-  “type”: “audio_frame”,
-  “audio”: “<base64_pcm>”,
-  “image”: “<base64_jpeg_512x512>”  // 仅 end-of-speech 时携带
-}
-
-// 后端 → 前端
-{
-  “type”: “tts_chunk”,
-  “audio”: “<base64_mp3_chunk>”,
-  “text”: “当前播放对应的文本”,
-  “is_final”: false
-}
 ```
+前端 → 后端:
+  {“type”: “audio”, “audio”: “<base64_pcm_16khz_mono>”}
+
+后端 → 前端:
+  {“type”: “asr_result”, “text”: “用户说的话”}
+  {“type”: “audio”, “is_final”: false}   ← TTS MP3 chunk (Base64)
+  {“type”: “audio”, “is_final”: true}    ← TTS 完成
+  {“type”: “error”, “message”: “抱歉...”}  ← ASR/TTS 失败
+```
+
+## 编码规范
+
+### Python 后端
+
+- 每个 AI API 调用必须 try/catch，失败通过 WebSocket 发送 `{“type”:”error”,”message”:”...”}` 降级
+- 流式生成器用 `async def` + `yield`，TTS 模式见上
+- API Key 走 `os.getenv()` / `python-dotenv`，禁止硬编码。配置常量集中在 `server/config.py`
+- 日志用 `logging` 模块，关键节点（ASR 耗时/TTFB/Token 消耗）必须打点
+- pytest fixture 收敛到 `tests/conftest.py`，module 级测试不要重复定义 `client` fixture
+
+### 前端 JS
+
+- UI 极简：摄像头预览 + 底部状态栏（绿/黄/红）+ 日志区，无框架
+- VAD 参数（`RMS_THRESHOLD`/`SILENCE_TIMEOUT_SEC`/`LOOKBACK_SEC`）顶部大写常量
+- 图片压缩（待实现）：512x512 Canvas resize，JPEG q=0.7
 
 ### 注释约束
 
-- Python 模块级 docstring 一行说明职责，如 `”””DashScope ASR 实时语音识别封装”””`
-- 关键函数精简说明参数与返回值，中文短句末尾不加句号
-- 前端 JS 函数用单行注释说明职责，复杂逻辑补一句意图说明
+- Python 模块 docstring 一行说明职责
+- 前端 JS 函数单行注释说明职责，复杂逻辑补意图
 
-## 文档维护约定
-- 设计文档（`docs/design.md`）随代码同步更新，最终转 PDF 提交
-- 阶段表（`阶段表.md`）为架构蓝图，重大决策变更时更新
-- 新增创新点或模块先更新阶段表，再改代码
+### Git 工作流
+
+- 每 PR = 独立 feature 分支从 main 切出 → 开发 → 本地 `pytest tests/ -v --ignore=tests/test_live.py` 全绿 → push → 创建 PR
+- PR 标题：`feat(scope): 做了什么`
+- merge 后删除远程分支
+- 阶段表 (`阶段表.md`) 和 PR 总览 (`pr总览.md`) 为设计文档，重大决策变更时更新
