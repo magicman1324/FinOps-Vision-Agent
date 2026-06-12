@@ -90,6 +90,15 @@ function sendAudio(pcm) {
   return true;
 }
 
+function sendImage(base64JPEG) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    console.warn('[WS] not connected, dropping image');
+    return false;
+  }
+  ws.send(JSON.stringify({ type: 'image', image: base64JPEG }));
+  return true;
+}
+
 function disconnect() {
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);
