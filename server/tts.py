@@ -6,7 +6,7 @@ import logging
 import time
 
 import dashscope
-from dashscope.audio.tts_v2 import ResultCallback, SpeechSynthesizer
+from dashscope.audio.tts_v2 import AudioFormat, ResultCallback, SpeechSynthesizer
 
 from server.config import DASHSCOPE_API_KEY, DASHSCOPE_TTS_MODEL, TTS_TIMEOUT
 
@@ -57,7 +57,7 @@ async def text_to_speech_stream(text: str):
     synthesizer = SpeechSynthesizer(
         model=DASHSCOPE_TTS_MODEL,
         voice="longxiaochun",
-        format="mp3",
+        format=AudioFormat.MP3_16000HZ_MONO_128KBPS,
         callback=callback,
     )
     try:
