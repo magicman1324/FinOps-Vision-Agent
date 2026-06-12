@@ -10,11 +10,13 @@ let reconnectDelay = 500;
 
 let onAsrResultCb = null;
 let onTtsChunkCb = null;
+let onVlmResultCb = null;
 let onErrorCb = null;
 let onStatusCb = null;
 
 function onAsrResult(cb) { onAsrResultCb = cb; }
 function onTtsChunk(cb) { onTtsChunkCb = cb; }
+function onVlmResult(cb) { onVlmResultCb = cb; }
 function onError(cb) { onErrorCb = cb; }
 function onStatus(cb) { onStatusCb = cb; }
 
@@ -55,6 +57,9 @@ function connect() {
           break;
         case 'audio':
           if (onTtsChunkCb) onTtsChunkCb(data.audio, data.is_final);
+          break;
+        case 'vlm_result':
+          if (onVlmResultCb) onVlmResultCb(data.text);
           break;
         case 'error':
           console.warn('[WS] server error:', data.message);

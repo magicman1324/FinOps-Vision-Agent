@@ -7,6 +7,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 from server.asr import ASRError, speech_to_text
 from server.tts import TTSError, text_to_speech_stream
+from server.vlm import VLMError, image_to_text
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
@@ -38,6 +39,8 @@ async def websocket_endpoint(ws: WebSocket):
 
             if msg_type == "audio":
                 await _handle_audio(ws, data)
+            elif msg_type == "image":
+                await _handle_visual(ws, data)
             else:
                 await ws.send_json({"type": "echo", "data": data})
     except WebSocketDisconnect:
@@ -74,3 +77,27 @@ async def _handle_audio(ws: WebSocket, data: dict):
         await ws.send_json(
             {"type": "error", "message": "抱歉，语音合成失败了"}
         )
+
+
+async def _handle_visual(ws: WebSocket, data: dict):
+    """处理图片消息：VLM 视觉推理"""
+    image_b64 = data.get("image", "")
+    if not image_b64:
+        await ws.send_json({"type": "error", "message": "missing image field"})
+        return
+
+    prompt = data.get("prompt", "请描述你看到的画面")
+
+    try:
+        text = image_to_text(image_b64, prompt)
+    except VLMError:
+        await ws.send_json(
+            {"type": "error", "message": "抱歉，图片分析失败了"}
+        )
+        return
+
+    if not text.strip():
+        await ws.send_json({"type": "error", "message": "未识别到画面内容"})
+        return
+
+    await ws.send_json({"type": "vlm_result", "text": text})

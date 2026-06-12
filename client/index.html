@@ -107,6 +107,10 @@ onAsrResult(function(text) {
   addLog('ASR: ' + text, 'ai');
 });
 
+onVlmResult(function(text) {
+  addLog('VLM: ' + text, 'ai');
+});
+
 onTtsChunk(function(audioB64, isFinal) {
   if (audioB64) ttsBuffer.push(audioB64);
   if (isFinal) {
@@ -160,7 +164,6 @@ async function initCamera() {
         addLog('WebSocket 未连接, 语音未发送', 'error');
         setStatus('', '就绪 — 请说话');
       }
-      // 同步截取当前画面
       const frame = captureFrame(camera);
       if (frame) {
         sendImage(frame);
