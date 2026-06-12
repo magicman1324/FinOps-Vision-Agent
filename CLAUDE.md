@@ -54,6 +54,9 @@ Skills 位于 `.claude/skills/` 目录，每个 skill 有独立的 `SKILL.md` �
 # 安装依赖
 pip install -r server/requirements.txt
 
+# Python 路径 (Windows, 非 PATH)
+# C:/Users/magic/AppData/Local/Programs/Python/Python312/python.exe
+
 # 启动后端
 uvicorn server.main:app --host 127.0.0.1 --port 8765
 
@@ -64,10 +67,10 @@ uvicorn server.main:app --host 127.0.0.1 --port 8765
 pytest tests/ -v --ignore=tests/test_live.py
 
 # 跑单个测试文件
-pytest tests/test_ws.py -v
+pytest tests/test_cascade.py -v
 
 # 跑单个测试函数
-pytest tests/test_ws.py::test_audio_pipeline -v
+pytest tests/test_router.py::TestL0VisualHits::test_color_inquiry -v
 
 # 跑真实 API 测试（需要 DASHSCOPE_API_KEY 环境变量）
 DASHSCOPE_API_KEY=sk-xxx pytest tests/test_live.py -v
@@ -81,16 +84,34 @@ DASHSCOPE_API_KEY=sk-xxx pytest tests/test_live.py -v
 - **测试：** pytest + pytest-asyncio，asyncio_mode=auto
 - **CI：** GitHub Actions ubuntu-latest，unit job（每次 push/PR）+ live job（仅 PR，需 secret）
 
-### 已实现 vs 计划中
+### 架构总览
 
-| 已实现 | 计划中 |
-|--------|--------|
-| `server/main.py` WebSocket ASR→TTS 管线 | `server/vlm.py` Qwen-VL-Max 视觉推理 |
-| `server/asr.py` DashScope 通义听悟 | `server/llm.py` DeepSeek-V3 纯文本 |
-| `server/tts.py` CosyVoice 流式 TTS | `server/router.py` L0/L1 双层意图路由 |
-| `server/config.py` 环境变量配置 | `server/memory.py` 三层语义压缩 |
-| `client/index.html` 摄像头+状态栏+日志 | `client/websocket.js` WebSocket 通信（当前为 stub） |
-| `client/vad.js` RMS VAD + 3s Ring Buffer | `docs/design.md` 设计文档 |
+```
+浏览器 (index.html)
+├── vad.js        — RMS VAD + 环形缓冲区，检测语音起止
+├── camera.js     — Canvas 512x512 截图, JPEG q=0.7 → Base64
+└── websocket.js  — WS 通信 + PCM 编码 + 指数退避重连 (max 10次)
+
+后端 (server/main.py, FastAPI WebSocket 单端点 /ws)
+├── asr.py        — DashScope 通义听悟 paraformer-realtime-v2
+├── router.py     — L0 关键词正则 (22 patterns) + L1 LLM 二分类兜底
+├── vlm.py        — Qwen-VL-Max 视觉推理 (sync, 无流式)
+├── llm.py        — DeepSeek-V3 流式文本生成 (httpx SSE)
+├── tts.py        — CosyVoice v2 流式 TTS (asyncio.Queue 桥接回调)
+├── memory.py     — 三层语义压缩 (short 3轮 → mid 摘要 → bg ≤150字)
+└── config.py     — 环境变量 (DASHSCOPE_API_KEY, DEEPSEEK_API_KEY)
+
+推理链路: audio → ASR → L0/L1意图路由 → 三级降级链 → TTS流式推送
+三级降级: _cascade_visual (VLM→LLM→预设文案) / _cascade_text (LLM→预设文案)
+```
+
+### 测试架构
+
+- `tests/conftest.py` 有 `autouse=True` fixture `_mock_llm`，全局 patch `server.main.ask_llm` 返回 `"mock response"`。所有 test 自动启用，防止意外调真实 API
+- 测试如需 mock `ask_llm` 失败路径，再显式 `patch("server.main.ask_llm", side_effect=LLMError(...))` 覆盖
+- L1 router 测试 patch `server.llm.ask_llm`（不是 `server.router.ask_llm`），因为 `ask_llm` 在 `classify_intent_l1` 内部 lazy import
+- TTS chunk 格式 `{"audio":"<base64>","is_final":bool}` — **无 `type` 字段**
+- 异步 generator mock 复用问题：多次调用需用 `side_effect=[gen1, gen2]`，不能用 `return_value`
 
 ### 核心架构模式
 
@@ -103,17 +124,29 @@ DashScope TTS v2 使用同步回调 `ResultCallback.on_data(bytes)` 交付音频
 **VAD 能量检测** (`client/vad.js`)：
 RMS 阈值 + 连续帧计数判定语音起止。`start` 时从环形缓冲区回溯 300ms，`end`（静音 >1.5s）触发 `onSpeechEnd(pcmFloat32Array)` 回调。
 
+**L0/L1 双层意图路由** (`server/router.py`)：
+L0 用 22 个中文正则零延迟匹配视觉关键词（"这是什么"、"什么颜色"、空间方位等）。L0 未命中时 L1 用 LLM 二分类兜底（prompt 约束只输出 "visual"/"textual"）。
+
+**三层语义压缩记忆** (`server/memory.py`)：
+Short 窗口（3 轮完整对话）→ evict 时 raw text 推入 Mid（最多 7 条）→ Mid 超限丢弃最旧。`compress_mid()` 异步 LLM 压缩为结构化摘要，`compress_background()` 将 mid 压缩为 ≤150 字元摘要注入 system prompt。
+
+**三级降级链** (`server/main.py`)：
+视觉问题：`_cascade_visual` L1 VLM → L2 LLM（告知看不到画面，凭常识回答）→ L3 `FALLBACK_PRESET`。文本问题：`_cascade_text` L1 LLM → L2 `FALLBACK_PRESET`。统一兜底文案：`"抱歉，我暂时无法处理这个问题，请稍后再试"`。
+
 ### WebSocket 消息协议
 
 ```
 前端 → 后端:
-  {“type”: “audio”, “audio”: “<base64_pcm_16khz_mono>”}
+  {"type": "audio", "audio": "<base64_pcm_16khz_mono>"}
+  {"type": "image", "image": "<base64_jpeg>"}
 
 后端 → 前端:
-  {“type”: “asr_result”, “text”: “用户说的话”}
-  {“type”: “audio”, “is_final”: false}   ← TTS MP3 chunk (Base64)
-  {“type”: “audio”, “is_final”: true}    ← TTS 完成
-  {“type”: “error”, “message”: “抱歉...”}  ← ASR/TTS 失败
+  {"type": "asr_result", "text": "用户说的话"}
+  {"type": "vlm_result", "text": "画面描述"}
+  {"type": "audio", "audio": "<base64>", "is_final": false}   ← TTS chunk, 无 type 字段
+  {"type": "audio", "audio": "", "is_final": true}            ← TTS 完成
+  {"type": "error", "message": "抱歉..."}                      ← 降级通知
+  {"type": "echo", "data": {...}}                             ← 未知消息类型回显
 ```
 
 ## 编码规范
@@ -124,13 +157,15 @@ RMS 阈值 + 连续帧计数判定语音起止。`start` 时从环形缓冲区�
 - 流式生成器用 `async def` + `yield`，TTS 模式见上
 - API Key 走 `os.getenv()` / `python-dotenv`，禁止硬编码。配置常量集中在 `server/config.py`
 - 日志用 `logging` 模块，关键节点（ASR 耗时/TTFB/Token 消耗）必须打点
-- pytest fixture 收敛到 `tests/conftest.py`，module 级测试不要重复定义 `client` fixture
+- pytest fixture 收敛到 `tests/conftest.py`；`client` fixture 已在 conftest 定义，module 级不要重复定义
+- `tests/conftest.py::_mock_llm` 是 autouse fixture，全局 mock `server.main.ask_llm`。写新测试时注意：需要 LLM 失败路径时，显式 `patch("server.main.ask_llm", side_effect=LLMError(...))` 覆盖
 
 ### 前端 JS
 
-- UI 极简：摄像头预览 + 底部状态栏（绿/黄/红）+ 日志区，无框架
+- UI：摄像头预览 + 底部状态栏（绿/黄/红）+ 日志区，无框架
 - VAD 参数（`RMS_THRESHOLD`/`SILENCE_TIMEOUT_SEC`/`LOOKBACK_SEC`）顶部大写常量
-- 图片压缩（待实现）：512x512 Canvas resize，JPEG q=0.7
+- 图片压缩：`camera.js` 512x512 Canvas resize，JPEG q=0.7，`captureDataURL()` 用于预览
+- WS 重连：`websocket.js` 指数退避 (500ms→10s)，最大 10 次重试，超限通知 UI
 
 ### 注释约束
 
