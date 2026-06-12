@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI 视觉对话助手</title>
+<style>
+:root {
+  --bg: #1a1a2e;
+  --surface: #16213e;
+  --text: #e0e0e0;
+  --accent: #4fc3f7;
+  --error: #ef5350;
+  --success: #66bb6a;
+  --warn: #ffa726;
+}
+body {
+  margin: 0; padding: 20px;
+  font-family: -apple-system, sans-serif;
+  background: var(--bg); color: var(--text);
+  min-height: 100vh;
+}
+#app {
+  max-width: 800px; margin: 0 auto;
+  display: flex; flex-direction: column; gap: 16px;
+}
+#video-container {
+  position: relative;
+  border-radius: 12px; overflow: hidden;
+  background: #000;
+}
+#camera {
+  width: 100%; display: block;
+}
+#status-bar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 16px;
+  background: var(--surface);
+  border-radius: 8px;
+  font-size: 14px;
+}
+#status-dot {
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: var(--success);
+  transition: background 0.3s;
+}
+#status-dot.listening { background: var(--warn); }
+#status-dot.processing { background: var(--warn); animation: pulse 1s infinite; }
+#status-dot.error { background: var(--error); }
+@keyframes pulse {
+  0%, 100% { opacity: 1; } 50% { opacity: 0.4; }
+}
+#log {
+  background: var(--surface);
+  border-radius: 8px; padding: 12px;
+  height: 200px; overflow-y: auto;
+  font-size: 13px; font-family: monospace;
+}
+.log-line { padding: 2px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+.log-line.user { color: var(--accent); }
+.log-line.ai { color: var(--success); }
+.log-line.error { color: var(--error); }
+.log-line.system { color: #888; }
+audio { display: none; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="video-container">
+    <video id="camera" autoplay playsinline muted></video>
+  </div>
+  <div id="status-bar">
+    <div id="status-dot"></div>
+    <span id="status-text">初始化中...</span>
+  </div>
+  <div id="log"></div>
+  <audio id="audio-player"></audio>
+</div>
+
+<script src="vad.js"></script>
+<script src="websocket.js"></script>
+<script>
+const camera = document.getElementById('camera');
+const statusDot = document.getElementById('status-dot');
+const statusText = document.getElementById('status-text');
+const audioPlayer = document.getElementById('audio-player');
+const logEl = document.getElementById('log');
+
+function setStatus(state, text) {
+  statusDot.className = state;
+  statusText.textContent = text;
+}
+
+function addLog(text, cls = 'system') {
+  const div = document.createElement('div');
+  div.className = 'log-line ' + cls;
+  div.textContent = new Date().toLocaleTimeString() + ' ' + text;
+  logEl.appendChild(div);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+async function initCamera() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: 640, height: 480 },
+      audio: true
+    });
+    camera.srcObject = stream;
+    addLog('摄像头/麦克风就绪', 'system');
+    setStatus('', '就绪 — 请说话');
+    return stream;
+  } catch (err) {
+    addLog('权限获取失败: ' + err.message, 'error');
+    setStatus('error', '摄像头/麦克风权限被拒绝');
+    throw err;
+  }
+}
+
+initCamera().catch(console.error);
+</script>
+</body>
+</html>
