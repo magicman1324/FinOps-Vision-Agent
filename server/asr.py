@@ -2,6 +2,8 @@
 
 import base64
 import logging
+import os
+import tempfile
 import time
 
 import dashscope
@@ -52,7 +54,13 @@ def speech_to_text(audio_base64: str) -> str:
         callback=collector,
     )
     start = time.monotonic()
-    recognition.call(audio_bytes)
+    with tempfile.NamedTemporaryFile(suffix=".pcm", delete=False) as tmp:
+        tmp.write(audio_bytes)
+        tmp_path = tmp.name
+    try:
+        recognition.call(tmp_path)
+    finally:
+        os.unlink(tmp_path)
     elapsed = time.monotonic() - start
     logger.info("ASR done: text=%r, elapsed=%.2fs", collector.text, elapsed)
     return collector.text
