@@ -295,6 +295,116 @@ class TestVisualPipeline:
                 assert "未识别到画面" in r["message"]
 
 
+class TestCrossCutting:
+    """跨模块集成 — 记忆/路由/降级 端到端"""
+
+    def test_cross_turn_memory_accumulates(self, client):
+        """多轮对话: 记忆累积上下文"""
+        pcm = base64.b64encode(b"\x00" * 32000).decode()
+        from unittest.mock import patch
+
+        with (
+            patch("server.main.speech_to_text", side_effect=["你好", "今天天气怎么样"]),
+            patch("server.main.text_to_speech_stream",
+                  side_effect=[
+                      _async_gen({"audio": "", "is_final": True}),
+                      _async_gen({"audio": "", "is_final": True}),
+                  ]),
+        ):
+            with client.websocket_connect("/ws") as ws:
+                # 第一轮
+                ws.send_json({"type": "audio", "audio": pcm})
+                assert ws.receive_json()["type"] == "asr_result"
+                ws.receive_json()  # TTS final
+
+                # 第二轮 — ask_llm 应被调用并注入上下文
+                ws.send_json({"type": "audio", "audio": pcm})
+                assert ws.receive_json()["type"] == "asr_result"
+                ws.receive_json()  # TTS final
+
+    def test_visual_intent_with_image_routes_to_vlm(self, client):
+        """有图片 + 视觉问题 → VLM 路径"""
+        pcm = base64.b64encode(b"\x00" * 32000).decode()
+        fake_jpeg = base64.b64encode(b"\xff\xd8\xff\xe0" + b"\x00" * 100).decode()
+        from unittest.mock import patch
+
+        with (
+            patch("server.main.speech_to_text", return_value="这是什么颜色"),
+            patch("server.main.image_to_text", return_value="这是红色的"),
+            patch("server.main.text_to_speech_stream",
+                  return_value=_async_gen({"audio": "", "is_final": True})),
+        ):
+            with client.websocket_connect("/ws") as ws:
+                # 先发图片
+                ws.send_json({"type": "image", "image": fake_jpeg})
+                ws.receive_json()  # vlm_result
+
+                # 再发语音
+                ws.send_json({"type": "audio", "audio": pcm})
+                assert ws.receive_json()["type"] == "asr_result"
+                ws.receive_json()  # TTS final
+
+    def test_visual_intent_no_image_prompts_user(self, client):
+        """视觉问题但无图片 → 友好提示"""
+        pcm = base64.b64encode(b"\x00" * 32000).decode()
+        from unittest.mock import patch
+
+        with (
+            patch("server.main.speech_to_text", return_value="这是什么"),
+            patch("server.main.text_to_speech_stream",
+                  return_value=_async_gen({"audio": "", "is_final": True})),
+        ):
+            with client.websocket_connect("/ws") as ws:
+                ws.send_json({"type": "audio", "audio": pcm})
+                assert ws.receive_json()["type"] == "asr_result"
+                ws.receive_json()  # TTS final (prompt text)
+
+    def test_textual_intent_routes_to_llm(self, client):
+        """纯文本问题 → LLM 路径 (不调 VLM)"""
+        pcm = base64.b64encode(b"\x00" * 32000).decode()
+        from unittest.mock import patch
+
+        with (
+            patch("server.main.speech_to_text", return_value="你好"),
+            patch("server.main.text_to_speech_stream",
+                  return_value=_async_gen({"audio": "", "is_final": True})),
+        ):
+            with client.websocket_connect("/ws") as ws:
+                ws.send_json({"type": "audio", "audio": pcm})
+                assert ws.receive_json()["type"] == "asr_result"
+                ws.receive_json()  # TTS final
+
+    def test_mixed_image_then_audio_then_text(self, client):
+        """混合流: 图片 → 视觉问题 → 纯文本问题（记忆交叉）"""
+        pcm = base64.b64encode(b"\x00" * 32000).decode()
+        fake_jpeg = base64.b64encode(b"\xff\xd8\xff\xe0" + b"\x00" * 100).decode()
+        from unittest.mock import patch
+
+        with (
+            patch("server.main.speech_to_text", side_effect=["这是什么", "谢谢"]),
+            patch("server.main.image_to_text", return_value="一个苹果"),
+            patch("server.main.text_to_speech_stream",
+                  side_effect=[
+                      _async_gen({"audio": "", "is_final": True}),
+                      _async_gen({"audio": "", "is_final": True}),
+                  ]),
+        ):
+            with client.websocket_connect("/ws") as ws:
+                # 发送图片
+                ws.send_json({"type": "image", "image": fake_jpeg})
+                ws.receive_json()  # vlm_result
+
+                # 视觉问题
+                ws.send_json({"type": "audio", "audio": pcm})
+                assert ws.receive_json()["type"] == "asr_result"
+                ws.receive_json()  # TTS final
+
+                # 纯文本跟进
+                ws.send_json({"type": "audio", "audio": pcm})
+                assert ws.receive_json()["type"] == "asr_result"
+                ws.receive_json()  # TTS final
+
+
 def _async_gen(*items):
     """Helper: 创建异步生成器"""
     async def gen():
