@@ -108,6 +108,13 @@ async function initCamera() {
     });
     camera.srcObject = stream;
     addLog('摄像头/麦克风就绪', 'system');
+    startVAD(stream);
+    onSpeechEnd(function(audio) {
+      setStatus('processing', '处理中...');
+      addLog('检测到语音 (' + (audio.length / VAD_SAMPLE_RATE).toFixed(1) + 's)', 'user');
+      // TODO: send via WebSocket (PR #10)
+      setTimeout(() => setStatus('', '就绪 — 请说话'), 1500);
+    });
     setStatus('', '就绪 — 请说话');
     return stream;
   } catch (err) {
