@@ -247,16 +247,52 @@ class TestEdgeCases:
 
 
 class TestVisualPipeline:
-    """视觉消息协议"""
+    """视觉消息协议: image→VLM→vlm_result"""
 
-    def test_image_message_accepted(self, client):
-        """image 类型消息被接收并 echo (VLM 端点待实现)"""
+    def test_image_to_vlm_result(self, client):
+        """完整视觉管线: image→VLM→vlm_result"""
         fake_jpeg = base64.b64encode(b"\xff\xd8\xff\xe0" + b"\x00" * 100).decode()
+
+        from unittest.mock import patch
+
+        with patch("server.main.image_to_text", return_value="画面中有一张桌子"):
+            with client.websocket_connect("/ws") as ws:
+                ws.send_json({"type": "image", "image": fake_jpeg})
+                r = ws.receive_json()
+                assert r["type"] == "vlm_result"
+                assert "桌子" in r["text"]
+
+    def test_image_missing_field(self, client):
         with client.websocket_connect("/ws") as ws:
-            ws.send_json({"type": "image", "image": fake_jpeg})
+            ws.send_json({"type": "image"})
             r = ws.receive_json()
-            assert r["type"] == "echo"
-            assert r["data"]["image"] == fake_jpeg
+            assert r["type"] == "error"
+            assert "missing image" in r["message"]
+
+    def test_image_vlm_error(self, client):
+        fake_jpeg = base64.b64encode(b"fake").decode()
+
+        from unittest.mock import patch
+        from server.vlm import VLMError
+
+        with patch("server.main.image_to_text", side_effect=VLMError("fail")):
+            with client.websocket_connect("/ws") as ws:
+                ws.send_json({"type": "image", "image": fake_jpeg})
+                r = ws.receive_json()
+                assert r["type"] == "error"
+                assert "图片分析失败" in r["message"]
+
+    def test_image_empty_result(self, client):
+        fake_jpeg = base64.b64encode(b"fake").decode()
+
+        from unittest.mock import patch
+
+        with patch("server.main.image_to_text", return_value="   "):
+            with client.websocket_connect("/ws") as ws:
+                ws.send_json({"type": "image", "image": fake_jpeg})
+                r = ws.receive_json()
+                assert r["type"] == "error"
+                assert "未识别到画面" in r["message"]
 
 
 def _async_gen(*items):
