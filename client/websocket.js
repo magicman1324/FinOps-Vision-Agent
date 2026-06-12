@@ -4,9 +4,12 @@
 
 const WS_URL = `ws://${location.hostname}:8765/ws`;
 
+const MAX_RETRIES = 10;
+
 let ws = null;
 let reconnectTimer = null;
 let reconnectDelay = 500;
+let retryCount = 0;
 
 let onAsrResultCb = null;
 let onTtsChunkCb = null;
@@ -44,6 +47,7 @@ function connect() {
 
   ws.onopen = () => {
     reconnectDelay = 500;
+    retryCount = 0;
     if (onStatusCb) onStatusCb('connected');
     console.log('[WS] connected');
   };
@@ -74,15 +78,24 @@ function connect() {
   };
 
   ws.onclose = () => {
-    if (onStatusCb) onStatusCb('disconnected');
-    console.log('[WS] disconnected, reconnect in', reconnectDelay);
+    if (retryCount >= MAX_RETRIES) {
+      console.warn('[WS] max retries exceeded, giving up');
+      if (onStatusCb) onStatusCb('error');
+      if (onErrorCb) onErrorCb('WebSocket 连接失败，已达最大重试次数');
+      return;
+    }
+    if (onStatusCb) onStatusCb('reconnecting');
+    console.log('[WS] disconnected, retry', retryCount + 1, '/', MAX_RETRIES, 'in', reconnectDelay);
     reconnectTimer = setTimeout(() => {
+      retryCount++;
       reconnectDelay = Math.min(reconnectDelay * 1.5, 10000);
       connect();
     }, reconnectDelay);
   };
 
-  ws.onerror = () => {}; // onclose fires after this
+  ws.onerror = (e) => {
+    console.warn('[WS] error, readyState:', ws ? ws.readyState : 'null');
+  };
 }
 
 function sendAudio(pcm) {
@@ -105,6 +118,7 @@ function sendImage(base64JPEG) {
 }
 
 function disconnect() {
+  retryCount = 0;
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
