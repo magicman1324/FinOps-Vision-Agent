@@ -1,11 +1,11 @@
-"""L0 关键词意图路由 — 正则匹配，零延迟零成本"""
+"""双层意图路由 — L0 关键词正则 + L1 LLM 二分类兜底"""
 
 import re
 import logging
 
 logger = logging.getLogger(__name__)
 
-# 视觉意图关键词模式 — 按优先级排列，命中任一即返回 visual
+# L0: 视觉意图关键词模式 — 命中任一即返回 visual
 VISUAL_PATTERNS = [
     # 对象辨识
     r"这是什么", r"那是什么", r"什么东西", r"是谁",
@@ -21,10 +21,10 @@ VISUAL_PATTERNS = [
     # 画面/媒体指代
     r"画面", r"图片", r"照片", r"图像", r"屏幕",
     r"摄像头", r"镜头", r"视频",
-    # 指代 + 物品（"这个X"、"那个X" 常伴随视觉场景）
+    # 指代 + 物品
     r"这个(东西|物品|物件|颜色|形状|人|是啥|是什么)",
     r"那个(东西|物品|物件|颜色|形状|人|是啥|是什么)",
-    # 手里/面前等第一人称空间锚点
+    # 第一人称空间锚点
     r"手里", r"手上", r"面前", r"眼前",
     r"桌子上", r"地上", r"墙上",
     # 展示请求
@@ -33,15 +33,14 @@ VISUAL_PATTERNS = [
     r"[长是]什么样[子]?", r"外观",
 ]
 
+L1_SYSTEM_PROMPT = (
+    "你是一个意图分类器。判断用户的问题是否需要借助视觉（看到画面/图片/摄像头）才能回答。"
+    "只需要回复 'visual' 或 'textual'，不要解释，不要标点，不要其他内容。"
+)
 
-def classify_intent(text: str) -> str:
-    """
-    L0 关键词路由：正则匹配视觉意图，其余走文本
 
-    Returns:
-        "visual" — 需要调用 VLM 处理图片
-        "textual" — 走 LLM 纯文本
-    """
+def classify_intent_l0(text: str) -> str:
+    """L0 关键词路由：正则匹配，零延迟零成本"""
     if not text or not text.strip():
         return "textual"
 
@@ -51,3 +50,23 @@ def classify_intent(text: str) -> str:
             return "visual"
 
     return "textual"
+
+
+async def classify_intent_l1(text: str) -> str:
+    """L1 LLM 二分类：当 L0 未命中时，用 DeepSeek-V3 兜底"""
+    from server.llm import ask_llm
+
+    raw = await ask_llm(text, system_prompt=L1_SYSTEM_PROMPT)
+    cleaned = raw.strip().lower()
+
+    if "visual" in cleaned:
+        logger.info("L1 → visual: text=%r", text[:80])
+        return "visual"
+
+    logger.debug("L1 → textual: text=%r", text[:80])
+    return "textual"
+
+
+def classify_intent(text: str) -> str:
+    """L0 关键词路由（同步，向后兼容）"""
+    return classify_intent_l0(text)
