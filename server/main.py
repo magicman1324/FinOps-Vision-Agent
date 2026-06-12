@@ -7,6 +7,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 from server.asr import ASRError, speech_to_text
 from server.llm import LLMError, ask_llm
+from server.memory import ConversationMemory
 from server.router import classify_intent_l0
 from server.tts import TTSError, text_to_speech_stream
 from server.vlm import VLMError, image_to_text
@@ -16,14 +17,22 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="AI Vision Dialogue", version="0.2.0")
+app = FastAPI(title="AI Vision Dialogue", version="0.3.0")
 
-# 每连接最新画面缓存
+# 每连接状态
 _images: dict[int, str] = {}
+_memories: dict[int, ConversationMemory] = {}
 
 
 def _cid(ws: WebSocket) -> int:
     return id(ws)
+
+
+def _get_memory(ws: WebSocket) -> ConversationMemory:
+    cid = _cid(ws)
+    if cid not in _memories:
+        _memories[cid] = ConversationMemory()
+    return _memories[cid]
 
 
 @app.get("/health")
@@ -57,10 +66,11 @@ async def websocket_endpoint(ws: WebSocket):
         logger.info("WebSocket disconnected cid=%d", cid)
     finally:
         _images.pop(cid, None)
+        _memories.pop(cid, None)
 
 
 async def _handle_audio(ws: WebSocket, data: dict):
-    """音频: ASR → 意图路由 → VLM/LLM → TTS"""
+    """音频: ASR → 意图路由 → VLM/LLM → TTS → 记忆"""
     audio_b64 = data.get("audio", "")
     if not audio_b64:
         await ws.send_json({"type": "error", "message": "missing audio field"})
@@ -82,18 +92,23 @@ async def _handle_audio(ws: WebSocket, data: dict):
     # 2. 意图分类 + 推理
     intent = classify_intent_l0(text)
     image = _images.get(_cid(ws))
+    memory = _get_memory(ws)
     response = ""
 
-    logger.info("intent=%s has_image=%s text=%r", intent, bool(image), text[:80])
+    logger.info("intent=%s has_image=%s turns=%d text=%r",
+                intent, bool(image), memory.turn_count, text[:80])
 
     if intent == "visual" and image:
-        response = await _vlm_answer(image, text)
+        response = await _vlm_answer(image, text, memory)
     elif intent == "visual" and not image:
         response = "我还没看到画面，请将摄像头对准你想问的东西"
     else:
-        response = await _llm_answer(text)
+        response = await _llm_answer(text, memory)
 
-    # 3. TTS 语音合成
+    # 3. 记入记忆
+    memory.add_turn(text, response)
+
+    # 4. TTS 语音合成
     try:
         async for chunk in text_to_speech_stream(response):
             await ws.send_json(chunk)
@@ -124,18 +139,22 @@ async def _handle_visual(ws: WebSocket, data: dict):
     await ws.send_json({"type": "vlm_result", "text": text})
 
 
-async def _vlm_answer(image: str, question: str) -> str:
-    """VLM 根据画面回答用户问题"""
+async def _vlm_answer(image: str, question: str, memory: ConversationMemory = None) -> str:
+    """VLM 根据画面+历史回答用户问题"""
+    ctx = memory.get_context() if memory else ""
     prompt = f"用户正在看着画面，问你: {question}\n请根据你看到的画面内容，直接回答用户的问题。用中文回答，简洁一点。"
+    if ctx:
+        prompt = f"对话历史:\n{ctx}\n\n{prompt}"
     try:
         return image_to_text(image, prompt)
     except VLMError:
         return "抱歉，图片分析失败了"
 
 
-async def _llm_answer(question: str) -> str:
-    """LLM 纯文本回答"""
+async def _llm_answer(question: str, memory: ConversationMemory = None) -> str:
+    """LLM 纯文本回答，注入记忆上下文"""
+    ctx = memory.get_context() if memory else ""
     try:
-        return await ask_llm(question)
+        return await ask_llm(question, system_prompt=ctx if ctx else None)
     except LLMError:
         return "抱歉，我暂时无法回答这个问题"
