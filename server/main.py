@@ -17,11 +17,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="AI Vision Dialogue", version="0.3.0")
+app = FastAPI(title="AI Vision Dialogue", version="0.3.1")
 
 # 每连接状态
 _images: dict[int, str] = {}
 _memories: dict[int, ConversationMemory] = {}
+
+# 三级降级链最终兜底文案
+FALLBACK_PRESET = "抱歉，我暂时无法处理这个问题，请稍后再试"
 
 
 def _cid(ws: WebSocket) -> int:
@@ -70,7 +73,7 @@ async def websocket_endpoint(ws: WebSocket):
 
 
 async def _handle_audio(ws: WebSocket, data: dict):
-    """音频: ASR → 意图路由 → VLM/LLM → TTS → 记忆"""
+    """音频: ASR → 意图路由 → 三级降级推理 → TTS → 记忆"""
     audio_b64 = data.get("audio", "")
     if not audio_b64:
         await ws.send_json({"type": "error", "message": "missing audio field"})
@@ -89,21 +92,20 @@ async def _handle_audio(ws: WebSocket, data: dict):
 
     await ws.send_json({"type": "asr_result", "text": text})
 
-    # 2. 意图分类 + 推理
+    # 2. 意图分类 + 三级降级推理
     intent = classify_intent_l0(text)
     image = _images.get(_cid(ws))
     memory = _get_memory(ws)
-    response = ""
 
     logger.info("intent=%s has_image=%s turns=%d text=%r",
                 intent, bool(image), memory.turn_count, text[:80])
 
     if intent == "visual" and image:
-        response = await _vlm_answer(image, text, memory)
+        response = await _cascade_visual(image, text, memory)
     elif intent == "visual" and not image:
         response = "我还没看到画面，请将摄像头对准你想问的东西"
     else:
-        response = await _llm_answer(text, memory)
+        response = await _cascade_text(text, memory)
 
     # 3. 记入记忆
     memory.add_turn(text, response)
@@ -139,22 +141,44 @@ async def _handle_visual(ws: WebSocket, data: dict):
     await ws.send_json({"type": "vlm_result", "text": text})
 
 
-async def _vlm_answer(image: str, question: str, memory: ConversationMemory = None) -> str:
-    """VLM 根据画面+历史回答用户问题"""
-    ctx = memory.get_context() if memory else ""
+# ---- 三级降级链 ----
+
+async def _cascade_visual(image: str, question: str, memory: ConversationMemory) -> str:
+    """L1 VLM → L2 LLM → L3 预设文案"""
+    ctx = memory.get_context()
+
+    # L1: VLM
     prompt = f"用户正在看着画面，问你: {question}\n请根据你看到的画面内容，直接回答用户的问题。用中文回答，简洁一点。"
     if ctx:
         prompt = f"对话历史:\n{ctx}\n\n{prompt}"
     try:
         return image_to_text(image, prompt)
     except VLMError:
-        return "抱歉，图片分析失败了"
+        logger.warning("VLM failed, cascading to LLM")
+
+    # L2: LLM 兜底
+    try:
+        llm_prompt = (
+            f"用户正在使用摄像头看东西，问: {question}\n"
+            "你暂时看不到画面，但请根据常识尽量回答。如果你无法回答，请友好地告知用户。"
+        )
+        return await ask_llm(llm_prompt, system_prompt=ctx if ctx else None)
+    except LLMError:
+        logger.warning("LLM also failed, using preset fallback")
+
+    # L3: 预设文案
+    return FALLBACK_PRESET
 
 
-async def _llm_answer(question: str, memory: ConversationMemory = None) -> str:
-    """LLM 纯文本回答，注入记忆上下文"""
-    ctx = memory.get_context() if memory else ""
+async def _cascade_text(question: str, memory: ConversationMemory) -> str:
+    """L1 LLM → L2 预设文案"""
+    ctx = memory.get_context()
+
+    # L1: LLM
     try:
         return await ask_llm(question, system_prompt=ctx if ctx else None)
     except LLMError:
-        return "抱歉，我暂时无法回答这个问题"
+        logger.warning("LLM failed, using preset fallback")
+
+    # L2: 预设文案
+    return FALLBACK_PRESET
