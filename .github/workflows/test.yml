@@ -7,9 +7,9 @@ on:
     branches: [main]
 
 jobs:
-  test:
+  unit:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
 
     steps:
       - uses: actions/checkout@v4
@@ -22,5 +22,28 @@ jobs:
       - name: Install dependencies
         run: pip install -r server/requirements.txt
 
-      - name: Run tests
-        run: python -m pytest tests/ -v
+      - name: Run unit tests
+        run: python -m pytest tests/ -v --ignore=tests/test_live.py
+
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install -r server/requirements.txt
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+
+      - name: Run live API tests
+        env:
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+        run: python -m pytest tests/test_live.py -v
