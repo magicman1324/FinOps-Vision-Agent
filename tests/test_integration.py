@@ -246,6 +246,19 @@ class TestEdgeCases:
             assert r["data"]["data"] == 42
 
 
+class TestVisualPipeline:
+    """视觉消息协议"""
+
+    def test_image_message_accepted(self, client):
+        """image 类型消息被接收并 echo (VLM 端点待实现)"""
+        fake_jpeg = base64.b64encode(b"\xff\xd8\xff\xe0" + b"\x00" * 100).decode()
+        with client.websocket_connect("/ws") as ws:
+            ws.send_json({"type": "image", "image": fake_jpeg})
+            r = ws.receive_json()
+            assert r["type"] == "echo"
+            assert r["data"]["image"] == fake_jpeg
+
+
 def _async_gen(*items):
     """Helper: 创建异步生成器"""
     async def gen():

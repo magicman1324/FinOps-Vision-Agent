@@ -160,6 +160,12 @@ async function initCamera() {
         addLog('WebSocket 未连接, 语音未发送', 'error');
         setStatus('', '就绪 — 请说话');
       }
+      // 同步截取当前画面
+      const frame = captureFrame(camera);
+      if (frame) {
+        sendImage(frame);
+        addLog('画面已截取 (512x512 JPEG)', 'system');
+      }
     });
     setStatus('', '就绪 — 请说话');
     return stream;
