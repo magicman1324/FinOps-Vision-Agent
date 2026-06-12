@@ -9,35 +9,45 @@
   --bg: #1a1a2e;
   --surface: #16213e;
   --text: #e0e0e0;
+  --text-muted: #888;
   --accent: #4fc3f7;
+  --accent-bg: rgba(79, 195, 247, 0.12);
   --error: #ef5350;
+  --error-bg: rgba(239, 83, 80, 0.12);
   --success: #66bb6a;
+  --success-bg: rgba(102, 187, 106, 0.12);
   --warn: #ffa726;
+  --bubble-radius: 14px;
 }
 body {
   margin: 0; padding: 20px;
-  font-family: -apple-system, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   background: var(--bg); color: var(--text);
   min-height: 100vh;
 }
 #app {
   max-width: 800px; margin: 0 auto;
-  display: flex; flex-direction: column; gap: 16px;
+  display: flex; flex-direction: column; gap: 12px;
+  height: calc(100vh - 40px);
 }
+
+/* 摄像头 */
 #video-container {
   position: relative;
   border-radius: 12px; overflow: hidden;
   background: #000;
+  flex-shrink: 0;
 }
-#camera {
-  width: 100%; display: block;
-}
+#camera { width: 100%; display: block; }
+
+/* 状态栏 */
 #status-bar {
   display: flex; align-items: center; gap: 8px;
-  padding: 8px 16px;
+  padding: 6px 14px;
   background: var(--surface);
   border-radius: 8px;
-  font-size: 14px;
+  font-size: 13px;
+  flex-shrink: 0;
 }
 #status-dot {
   width: 10px; height: 10px;
@@ -45,23 +55,76 @@ body {
   background: var(--success);
   transition: background 0.3s;
 }
-#status-dot.listening { background: var(--warn); }
-#status-dot.processing { background: var(--warn); animation: pulse 1s infinite; }
+#status-dot.listening { background: var(--warn); animation: pulse 0.8s infinite; }
+#status-dot.processing { background: var(--warn); animation: pulse 0.6s infinite; }
 #status-dot.error { background: var(--error); }
+#status-dot.idle { background: var(--success); }
 @keyframes pulse {
-  0%, 100% { opacity: 1; } 50% { opacity: 0.4; }
+  0%, 100% { opacity: 1; } 50% { opacity: 0.3; }
 }
-#log {
-  background: var(--surface);
-  border-radius: 8px; padding: 12px;
-  height: 200px; overflow-y: auto;
-  font-size: 13px; font-family: monospace;
+
+/* 对话气泡区 */
+#chat {
+  flex: 1;
+  overflow-y: auto;
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 4px 0;
 }
-.log-line { padding: 2px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
-.log-line.user { color: var(--accent); }
-.log-line.ai { color: var(--success); }
-.log-line.error { color: var(--error); }
-.log-line.system { color: #888; }
+.chat-msg {
+  display: flex; flex-direction: column;
+  max-width: 80%;
+  padding: 8px 14px;
+  border-radius: var(--bubble-radius);
+  font-size: 14px; line-height: 1.55;
+  animation: fadeIn 0.25s ease;
+}
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.chat-msg .time {
+  font-size: 10px; opacity: 0.5;
+  margin-bottom: 2px;
+}
+
+/* 用户 (右侧, 青色) */
+.chat-msg.user {
+  align-self: flex-end;
+  background: var(--accent-bg);
+  border-bottom-right-radius: 4px;
+  text-align: right;
+  color: var(--accent);
+}
+
+/* AI (左侧, 绿色) */
+.chat-msg.assistant {
+  align-self: flex-start;
+  background: var(--success-bg);
+  border-bottom-left-radius: 4px;
+  color: var(--text);
+}
+
+/* 系统 (居中, 灰色) */
+.chat-msg.system {
+  align-self: center;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 2px 8px;
+  max-width: 100%;
+  text-align: center;
+}
+
+/* 错误 (全宽, 红色) */
+.chat-msg.error {
+  align-self: stretch;
+  background: var(--error-bg);
+  border-left: 3px solid var(--error);
+  border-radius: 4px;
+  color: var(--error);
+  max-width: 100%;
+}
+
 audio { display: none; }
 </style>
 </head>
@@ -71,10 +134,10 @@ audio { display: none; }
     <video id="camera" autoplay playsinline muted></video>
   </div>
   <div id="status-bar">
-    <div id="status-dot"></div>
+    <div id="status-dot" class="idle"></div>
     <span id="status-text">初始化中...</span>
   </div>
-  <div id="log"></div>
+  <div id="chat"></div>
   <audio id="audio-player"></audio>
 </div>
 
@@ -86,29 +149,36 @@ const camera = document.getElementById('camera');
 const statusDot = document.getElementById('status-dot');
 const statusText = document.getElementById('status-text');
 const audioPlayer = document.getElementById('audio-player');
-const logEl = document.getElementById('log');
+const chatEl = document.getElementById('chat');
 
 function setStatus(state, text) {
   statusDot.className = state;
   statusText.textContent = text;
 }
 
-function addLog(text, cls = 'system') {
+function addBubble(text, cls) {
   const div = document.createElement('div');
-  div.className = 'log-line ' + cls;
-  div.textContent = new Date().toLocaleTimeString() + ' ' + text;
-  logEl.appendChild(div);
-  logEl.scrollTop = logEl.scrollHeight;
+  div.className = 'chat-msg ' + cls;
+
+  const time = document.createElement('div');
+  time.className = 'time';
+  time.textContent = new Date().toLocaleTimeString();
+
+  div.appendChild(time);
+  div.appendChild(document.createTextNode(text));
+  chatEl.appendChild(div);
+  chatEl.scrollTop = chatEl.scrollHeight;
 }
 
 let ttsBuffer = [];
 
 onAsrResult(function(text) {
-  addLog('ASR: ' + text, 'ai');
+  addBubble(text, 'user');
+  setStatus('processing', '思考中...');
 });
 
 onVlmResult(function(text) {
-  addLog('VLM: ' + text, 'ai');
+  addBubble(text, 'system');
 });
 
 onTtsChunk(function(audioB64, isFinal) {
@@ -123,23 +193,26 @@ onTtsChunk(function(audioB64, isFinal) {
         bytes[i] = binary.charCodeAt(i);
       }
       const blob = new Blob([bytes], { type: 'audio/mp3' });
-      const url = URL.createObjectURL(blob);
-      audioPlayer.src = url;
+      audioPlayer.src = URL.createObjectURL(blob);
       audioPlayer.play().catch(console.warn);
+      // 播放时状态反馈
+      audioPlayer.onplay = () => setStatus('', '播放中...');
+      audioPlayer.onended = () => setStatus('idle', '就绪 — 请说话');
+    } else {
+      setStatus('idle', '就绪 — 请说话');
     }
-    setStatus('', '就绪 — 请说话');
   }
 });
 
 onError(function(msg) {
-  addLog('错误: ' + msg, 'error');
+  addBubble(msg, 'error');
   setStatus('error', '服务端错误');
-  setTimeout(() => setStatus('', '就绪 — 请说话'), 2000);
+  setTimeout(() => setStatus('idle', '就绪 — 请说话'), 2500);
 });
 
 onStatus(function(state) {
   if (state === 'connected') {
-    if (statusText.textContent === '初始化中...') setStatus('', '就绪 — 请说话');
+    if (statusText.textContent === '初始化中...') setStatus('idle', '就绪 — 请说话');
   }
   if (state === 'reconnecting') {
     setStatus('error', '连接断开, 重连中...');
@@ -161,25 +234,25 @@ async function initCamera() {
       audio: true
     });
     camera.srcObject = stream;
-    addLog('摄像头/麦克风就绪', 'system');
+    addBubble('摄像头/麦克风就绪', 'system');
     startVAD(stream);
     onSpeechEnd(function(audio) {
       setStatus('processing', '处理中...');
-      addLog('检测到语音 (' + (audio.length / VAD_SAMPLE_RATE).toFixed(1) + 's)', 'user');
+      const dur = (audio.length / VAD_SAMPLE_RATE).toFixed(1);
+      addBubble('语音 ' + dur + 's', 'user');
       if (!sendAudio(audio)) {
-        addLog('WebSocket 未连接, 语音未发送', 'error');
-        setStatus('', '就绪 — 请说话');
+        addBubble('WebSocket 未连接, 语音未发送', 'error');
+        setStatus('idle', '就绪 — 请说话');
       }
       const frame = captureFrame(camera);
       if (frame) {
         sendImage(frame);
-        addLog('画面已截取 (512x512 JPEG)', 'system');
       }
     });
-    setStatus('', '就绪 — 请说话');
+    setStatus('idle', '就绪 — 请说话');
     return stream;
   } catch (err) {
-    addLog('权限获取失败: ' + err.message, 'error');
+    addBubble('权限获取失败: ' + err.message, 'error');
     setStatus('error', '摄像头/麦克风权限被拒绝');
     throw err;
   }
