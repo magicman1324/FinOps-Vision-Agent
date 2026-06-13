@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from server.asr import ASRError, speech_to_text
 from server.llm import LLMError, ask_llm
 from server.memory import ConversationMemory
-from server.router import classify_intent_l0, classify_intent_l1
+from server.router import classify_intent_l0
 from server.tts import TTSError, text_to_speech_stream
 from server.vlm import VLMError, image_to_text
 
@@ -33,7 +33,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="AI Vision Dialogue", version="0.3.1")
+app = FastAPI(title="AI Vision Dialogue", version="0.4.0")
 
 # 每连接状态
 _images: dict[int, str] = {}
@@ -76,7 +76,8 @@ async def websocket_endpoint(ws: WebSocket):
             msg_type = data.get("type", "")
 
             if msg_type == "audio":
-                await _handle_audio(ws, data, trace)
+                seq = data.get("seq", 0)
+                await _handle_audio(ws, data, trace, seq)
             elif msg_type == "image":
                 await _handle_visual(ws, data, trace)
             else:
@@ -88,7 +89,7 @@ async def websocket_endpoint(ws: WebSocket):
         _memories.pop(cid, None)
 
 
-async def _handle_audio(ws: WebSocket, data: AudioMessage, trace: str = "-"):
+async def _handle_audio(ws: WebSocket, data: AudioMessage, trace: str = "-", seq: int = 0):
     """音频: ASR → 意图路由 → 三级降级推理 → TTS → 记忆"""
     audio_b64 = data.get("audio", "")
     if not audio_b64:
@@ -97,7 +98,7 @@ async def _handle_audio(ws: WebSocket, data: AudioMessage, trace: str = "-"):
 
     # 1. 语音识别
     try:
-        text = speech_to_text(audio_b64)
+        text = await asyncio.to_thread(speech_to_text, audio_b64)
     except ASRError:
         await ws.send_json({"type": "error", "message": "抱歉，我没听清，请再说一次"})
         return
@@ -108,10 +109,8 @@ async def _handle_audio(ws: WebSocket, data: AudioMessage, trace: str = "-"):
 
     await ws.send_json({"type": "asr_result", "text": text})
 
-    # 2. 意图分类 (L0 正则 → L1 LLM 兜底) + 三级降级推理
+    # 2. 意图分类 (L0 正则，22 条视觉关键词覆盖) + 三级降级推理
     intent = classify_intent_l0(text)
-    if intent == "textual":
-        intent = await classify_intent_l1(text)
     image = _images.get(_cid(ws))
     memory = _get_memory(ws)
 
@@ -125,12 +124,17 @@ async def _handle_audio(ws: WebSocket, data: AudioMessage, trace: str = "-"):
     else:
         response = await _cascade_text(text, memory)
 
+    # 发送文字回复给前端
+    await ws.send_json({"type": "text_result", "text": response})
+
     # 3. 记入记忆 + 异步压缩
     memory.add_turn(text, response)
     if memory.mid_count > 0 and not memory.mid_compressed:
-        asyncio.create_task(memory.compress_mid())
+        task = asyncio.create_task(memory.compress_mid())
+        task.add_done_callback(lambda t: t.exception() and logger.error("compress_mid failed: %s", t.exception()))
     if memory.mid_compressed and memory.mid_count >= 2:
-        asyncio.create_task(memory.compress_background())
+        task = asyncio.create_task(memory.compress_background())
+        task.add_done_callback(lambda t: t.exception() and logger.error("compress_background failed: %s", t.exception()))
 
     # 4. TTS 语音合成
     try:
@@ -184,7 +188,10 @@ async def _cascade_visual(image: str, question: str, memory: ConversationMemory)
             f"用户正在使用摄像头看东西，问: {question}\n"
             "你暂时看不到画面，但请根据常识尽量回答。如果你无法回答，请友好地告知用户。"
         )
-        return await ask_llm(llm_prompt, system_prompt=ctx if ctx else None)
+        history = memory.get_short_history()
+        bg = memory.bg_summary
+        system = f"你是一个语音对话助手。{bg}" if bg else None
+        return await ask_llm(llm_prompt, system_prompt=system, messages=history)
     except LLMError:
         logger.warning("LLM also failed, using preset fallback")
 
@@ -194,11 +201,13 @@ async def _cascade_visual(image: str, question: str, memory: ConversationMemory)
 
 async def _cascade_text(question: str, memory: ConversationMemory) -> str:
     """L1 LLM → L2 预设文案"""
-    ctx = memory.get_context()
+    history = memory.get_short_history()
+    bg = memory.bg_summary
+    system = f"你是一个语音对话助手。{bg}" if bg else None
 
     # L1: LLM
     try:
-        return await ask_llm(question, system_prompt=ctx if ctx else None)
+        return await ask_llm(question, system_prompt=system, messages=history)
     except LLMError:
         logger.warning("LLM failed, using preset fallback")
 

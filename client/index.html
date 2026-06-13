@@ -237,9 +237,9 @@ audio { display: none; }
   <audio id="audio-player"></audio>
 </div>
 
-<script src="vad.js?v=13"></script>
+<script src="vad.js?v=16"></script>
 <script src="camera.js?v=2"></script>
-<script src="websocket.js?v=6"></script>
+<script src="websocket.js?v=9"></script>
 <script>
 const camera = document.getElementById('camera');
 const statusDot = document.getElementById('status-dot');
@@ -284,6 +284,15 @@ onRecordState(function(active) {
   }
 });
 
+// 音频被丢弃时的反馈
+onDrop(function(reason) {
+  const msg = reason === 'too_short' ? '语音太短，请按住说话完整短语' : '语音识别失败，请重说';
+  console.warn('[PTT] dropped:', reason);
+  addBubble(msg, 'error');
+  setStatus('error', '未发送');
+  setTimeout(() => setStatus('idle', '就绪'), 2000);
+});
+
 function addBubble(text, cls) {
   const div = document.createElement('div');
   div.className = 'chat-msg ' + cls;
@@ -299,10 +308,37 @@ function addBubble(text, cls) {
 }
 
 let ttsBuffer = [];
+let _msgSeq = 0;
+let _playQueue = [];
+let _isPlaying = false;
+let _currentBlobUrl = null;
+
+function _playNext() {
+  if (_playQueue.length === 0) {
+    _isPlaying = false;
+    setStatus('idle', '就绪');
+    return;
+  }
+  _isPlaying = true;
+  const blob = _playQueue.shift();
+  if (_currentBlobUrl) URL.revokeObjectURL(_currentBlobUrl);
+  _currentBlobUrl = URL.createObjectURL(blob);
+  audioPlayer.src = _currentBlobUrl;
+  audioPlayer.onplay = () => setStatus('', '播放中...');
+  audioPlayer.onended = () => _playNext();
+  audioPlayer.play().catch(function() {
+    if (_isPlaying) _playNext();
+  });
+}
 
 onAsrResult(function(text) {
   addBubble(text, 'user');
   setStatus('processing', '思考中...');
+});
+
+onTextResult(function(text) {
+  addBubble(text, 'assistant');
+  setStatus('idle', '');
 });
 
 onVlmResult(function(text) {
@@ -321,12 +357,8 @@ onTtsChunk(function(audioB64, isFinal) {
         bytes[i] = binary.charCodeAt(i);
       }
       const blob = new Blob([bytes], { type: 'audio/mp3' });
-      audioPlayer.src = URL.createObjectURL(blob);
-      audioPlayer.play().catch(console.warn);
-      audioPlayer.onplay = () => setStatus('', '播放中...');
-      audioPlayer.onended = () => setStatus('idle', '就绪');
-    } else {
-      setStatus('idle', '就绪');
+      _playQueue.push(blob);
+      if (!_isPlaying) _playNext();
     }
   }
 });
@@ -377,6 +409,10 @@ pttBtn.addEventListener('touchend', function(e) {
   e.preventDefault();
   sendRecording();
 });
+pttBtn.addEventListener('touchcancel', function(e) {
+  e.preventDefault();
+  sendRecording();
+});
 
 function sendRecording() {
   stopRecording();
@@ -399,14 +435,17 @@ async function initCamera() {
     onSpeechEnd(function(audio) {
       // stopRecording() 触发此回调
       const dur = (audio.length / VAD_SAMPLE_RATE).toFixed(1);
-      addBubble('语音 ' + dur + 's', 'user');
+      const seq = ++_msgSeq;
+      console.log('[PTT] send seq=%d dur=%ss', seq, dur);
       if (!sendAudio(audio)) {
         addBubble('WebSocket 未连接, 语音未发送', 'error');
         setStatus('idle', '就绪');
+        return;
       }
+      setStatus('processing', '识别中...');
       const frame = captureFrame(camera);
-      if (frame) {
-        sendImage(frame);
+      if (frame && !sendImage(frame)) {
+        console.warn('[PTT] image dropped (WS not connected)');
       }
     });
     setStatus('idle', '就绪');

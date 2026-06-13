@@ -14,12 +14,14 @@ let retryCount = 0;
 let onAsrResultCb = null;
 let onTtsChunkCb = null;
 let onVlmResultCb = null;
+let onTextResultCb = null;
 let onErrorCb = null;
 let onStatusCb = null;
 
 function onAsrResult(cb) { onAsrResultCb = cb; }
 function onTtsChunk(cb) { onTtsChunkCb = cb; }
 function onVlmResult(cb) { onVlmResultCb = cb; }
+function onTextResult(cb) { onTextResultCb = cb; }
 function onError(cb) { onErrorCb = cb; }
 function onStatus(cb) { onStatusCb = cb; }
 
@@ -81,6 +83,9 @@ function connect() {
         case 'vlm_result':
           if (onVlmResultCb) onVlmResultCb(data.text);
           break;
+        case 'text_result':
+          if (onTextResultCb) onTextResultCb(data.text);
+          break;
         case 'error':
           console.warn('[WS] server error:', data.message);
           if (onErrorCb) onErrorCb(data.message);
@@ -114,13 +119,13 @@ function connect() {
   };
 }
 
-function sendAudio(pcm) {
+function sendAudio(pcm, seq) {
   if (!ws || ws.readyState !== WebSocket.OPEN) {
     console.warn('[WS] not connected, dropping audio');
     return false;
   }
   const b64 = pcmToBase64(pcm);
-  ws.send(JSON.stringify({ type: 'audio', audio: b64 }));
+  ws.send(JSON.stringify({ type: 'audio', audio: b64, seq: seq || 0 }));
   return true;
 }
 

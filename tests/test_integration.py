@@ -59,8 +59,8 @@ class TestAudioPipeline:
             patch(
                 "server.main.text_to_speech_stream",
                 return_value=_async_gen(
-                    {"audio": "Y2h1bmsx", "is_final": False},
-                    {"audio": "", "is_final": True},
+                    {"type": "audio", "audio": "Y2h1bmsx", "is_final": False},
+                    {"type": "audio", "audio": "", "is_final": True},
                 ),
             ),
         ):
@@ -72,7 +72,11 @@ class TestAudioPipeline:
                 assert r1["type"] == "asr_result"
                 assert r1["text"] == "你好世界"
 
-                # 2. TTS chunk
+                # 2. text_result
+                r_text = ws.receive_json()
+                assert r_text["type"] == "text_result"
+
+                # 3. TTS chunk
                 r2 = ws.receive_json()
                 assert r2["audio"] == "Y2h1bmsx"
                 assert r2["is_final"] is False
@@ -94,7 +98,7 @@ class TestAudioPipeline:
             patch("server.main.speech_to_text", return_value="测试"),
             patch(
                 "server.main.text_to_speech_stream",
-                return_value=_async_gen({"audio": "", "is_final": True}),
+                return_value=_async_gen({"type": "audio", "audio": "", "is_final": True}),
             ),
         ):
             with client.websocket_connect("/ws") as ws:
@@ -114,8 +118,8 @@ class TestAudioPipeline:
             patch(
                 "server.main.text_to_speech_stream",
                 side_effect=[
-                    _async_gen({"audio": "", "is_final": True}),
-                    _async_gen({"audio": "", "is_final": True}),
+                    _async_gen({"type": "audio", "audio": "", "is_final": True}),
+                    _async_gen({"type": "audio", "audio": "", "is_final": True}),
                 ],
             ),
         ):
@@ -125,8 +129,9 @@ class TestAudioPipeline:
                     r = ws.receive_json()
                     assert r["type"] == "asr_result"
                     assert r["text"] == expected
-                    # drain TTS final
-                    ws.receive_json()
+                    # drain text_result + TTS final
+                    ws.receive_json()  # text_result
+                    ws.receive_json()  # TTS final
 
     def test_rapid_consecutive_sends(self, client, pcm_b64):
         """快速连续发送，验证不丢帧不乱序"""
@@ -137,7 +142,7 @@ class TestAudioPipeline:
             patch(
                 "server.main.text_to_speech_stream",
                 side_effect=[
-                    _async_gen({"audio": "", "is_final": True})
+                    _async_gen({"type": "audio", "audio": "", "is_final": True})
                     for _ in range(5)
                 ],
             ),
@@ -149,6 +154,7 @@ class TestAudioPipeline:
                 for i in range(5):
                     r1 = ws.receive_json()
                     assert r1["type"] == "asr_result", f"msg {i}: expected asr_result, got {r1['type']}"
+                    ws.receive_json()  # text_result
                     r2 = ws.receive_json()
                     assert r2["is_final"] is True, f"msg {i}: expected final"
 
@@ -163,7 +169,7 @@ class TestAudioPipeline:
             patch("server.main.speech_to_text", return_value="长句测试"),
             patch(
                 "server.main.text_to_speech_stream",
-                return_value=_async_gen({"audio": "", "is_final": True}),
+                return_value=_async_gen({"type": "audio", "audio": "", "is_final": True}),
             ),
         ):
             with client.websocket_connect("/ws") as ws:
@@ -202,6 +208,7 @@ class TestErrorHandling:
                 # ASR should succeed
                 r1 = ws.receive_json()
                 assert r1["type"] == "asr_result"
+                ws.receive_json()  # text_result
                 # TTS should error
                 r2 = ws.receive_json()
                 assert r2["type"] == "error"
@@ -307,19 +314,21 @@ class TestCrossCutting:
             patch("server.main.speech_to_text", side_effect=["你好", "今天天气怎么样"]),
             patch("server.main.text_to_speech_stream",
                   side_effect=[
-                      _async_gen({"audio": "", "is_final": True}),
-                      _async_gen({"audio": "", "is_final": True}),
+                      _async_gen({"type": "audio", "audio": "", "is_final": True}),
+                      _async_gen({"type": "audio", "audio": "", "is_final": True}),
                   ]),
         ):
             with client.websocket_connect("/ws") as ws:
                 # 第一轮
                 ws.send_json({"type": "audio", "audio": pcm})
                 assert ws.receive_json()["type"] == "asr_result"
+                ws.receive_json()  # text_result
                 ws.receive_json()  # TTS final
 
                 # 第二轮 — ask_llm 应被调用并注入上下文
                 ws.send_json({"type": "audio", "audio": pcm})
                 assert ws.receive_json()["type"] == "asr_result"
+                ws.receive_json()  # text_result
                 ws.receive_json()  # TTS final
 
     def test_visual_intent_with_image_routes_to_vlm(self, client):
@@ -332,7 +341,7 @@ class TestCrossCutting:
             patch("server.main.speech_to_text", return_value="这是什么颜色"),
             patch("server.main.image_to_text", return_value="这是红色的"),
             patch("server.main.text_to_speech_stream",
-                  return_value=_async_gen({"audio": "", "is_final": True})),
+                  return_value=_async_gen({"type": "audio", "audio": "", "is_final": True})),
         ):
             with client.websocket_connect("/ws") as ws:
                 # 先发图片
@@ -352,7 +361,7 @@ class TestCrossCutting:
         with (
             patch("server.main.speech_to_text", return_value="这是什么"),
             patch("server.main.text_to_speech_stream",
-                  return_value=_async_gen({"audio": "", "is_final": True})),
+                  return_value=_async_gen({"type": "audio", "audio": "", "is_final": True})),
         ):
             with client.websocket_connect("/ws") as ws:
                 ws.send_json({"type": "audio", "audio": pcm})
@@ -367,7 +376,7 @@ class TestCrossCutting:
         with (
             patch("server.main.speech_to_text", return_value="你好"),
             patch("server.main.text_to_speech_stream",
-                  return_value=_async_gen({"audio": "", "is_final": True})),
+                  return_value=_async_gen({"type": "audio", "audio": "", "is_final": True})),
         ):
             with client.websocket_connect("/ws") as ws:
                 ws.send_json({"type": "audio", "audio": pcm})
@@ -385,8 +394,8 @@ class TestCrossCutting:
             patch("server.main.image_to_text", return_value="一个苹果"),
             patch("server.main.text_to_speech_stream",
                   side_effect=[
-                      _async_gen({"audio": "", "is_final": True}),
-                      _async_gen({"audio": "", "is_final": True}),
+                      _async_gen({"type": "audio", "audio": "", "is_final": True}),
+                      _async_gen({"type": "audio", "audio": "", "is_final": True}),
                   ]),
         ):
             with client.websocket_connect("/ws") as ws:
@@ -395,24 +404,25 @@ class TestCrossCutting:
 
                 ws.send_json({"type": "audio", "audio": pcm})
                 assert ws.receive_json()["type"] == "asr_result"
-                ws.receive_json()
+                ws.receive_json()  # text_result
+                ws.receive_json()  # TTS final
 
                 ws.send_json({"type": "audio", "audio": pcm})
                 assert ws.receive_json()["type"] == "asr_result"
-                ws.receive_json()
+                ws.receive_json()  # text_result
+                ws.receive_json()  # TTS final
 
-    def test_l1_router_fallback_to_visual(self, client):
-        """L0 未命中 → L1 LLM 识别为 visual → VLM 路径"""
+    def test_l0_miss_goes_textual(self, client):
+        """L0 未命中 → textual 路径 (L1 已移除，无 LLM 二分类兜底)"""
         pcm = base64.b64encode(b"\x00" * 32000).decode()
         fake_jpeg = base64.b64encode(b"\xff\xd8\xff\xe0" + b"\x00" * 100).decode()
         from unittest.mock import patch
 
         with (
             patch("server.main.speech_to_text", return_value="这东西挺贵的"),
-            patch("server.main.classify_intent_l1", return_value="visual"),
             patch("server.main.image_to_text", return_value="画面中有奢侈品"),
             patch("server.main.text_to_speech_stream",
-                  return_value=_async_gen({"audio": "", "is_final": True})),
+                  return_value=_async_gen({"type": "audio", "audio": "", "is_final": True})),
         ):
             with client.websocket_connect("/ws") as ws:
                 ws.send_json({"type": "image", "image": fake_jpeg})
@@ -420,7 +430,9 @@ class TestCrossCutting:
 
                 ws.send_json({"type": "audio", "audio": pcm})
                 assert ws.receive_json()["type"] == "asr_result"
-                ws.receive_json()
+                r_text = ws.receive_json()
+                assert r_text["type"] == "text_result"
+                assert "mock response" in r_text["text"]
 
     def test_memory_compress_triggered(self, client):
         """多轮对话触发记忆异步压缩"""
@@ -431,19 +443,21 @@ class TestCrossCutting:
             patch("server.main.speech_to_text", side_effect=["第1轮", "第2轮"]),
             patch("server.main.text_to_speech_stream",
                   side_effect=[
-                      _async_gen({"audio": "", "is_final": True}),
-                      _async_gen({"audio": "", "is_final": True}),
+                      _async_gen({"type": "audio", "audio": "", "is_final": True}),
+                      _async_gen({"type": "audio", "audio": "", "is_final": True}),
                   ]),
         ):
             with client.websocket_connect("/ws") as ws:
                 # 第1轮 — 短窗口内，不触发压缩
                 ws.send_json({"type": "audio", "audio": pcm})
                 assert ws.receive_json()["type"] == "asr_result"
+                ws.receive_json()  # text_result
                 ws.receive_json()  # TTS
 
                 # 第2轮 — mid 积累，触发 compress_mid
                 ws.send_json({"type": "audio", "audio": pcm})
                 assert ws.receive_json()["type"] == "asr_result"
+                ws.receive_json()  # text_result
                 ws.receive_json()  # TTS
 
         # 测试结束，压缩任务应在后台完成（不阻塞）

@@ -68,15 +68,15 @@ def test_audio_asr_error(client):
 
 
 def test_audio_pipeline(client):
-    """完整音频管线：ASR → TTS 流式推送"""
+    """完整音频管线：ASR → 文字回复 → TTS 流式推送"""
     with client.websocket_connect("/ws") as ws:
         with (
             patch("server.main.speech_to_text", return_value="你好"),
             patch(
                 "server.main.text_to_speech_stream",
                 return_value=_async_gen(
-                    {"audio": "bW9jaw==", "is_final": False},
-                    {"audio": "", "is_final": True},
+                    {"type": "audio", "audio": "bW9jaw==", "is_final": False},
+                    {"type": "audio", "audio": "", "is_final": True},
                 ),
             ),
         ):
@@ -85,10 +85,16 @@ def test_audio_pipeline(client):
             r1 = ws.receive_json()
             assert r1["type"] == "asr_result"
             assert r1["text"] == "你好"
-            # 第2个: tts chunk
+            # 第2个: text_result (LLM 文字回复)
             r2 = ws.receive_json()
-            assert r2["audio"] == "bW9jaw=="
-            assert r2["is_final"] is False
-            # 第3个: tts final
+            assert r2["type"] == "text_result"
+            assert r2["text"] == "mock response"  # autouse _mock_llm
+            # 第3个: tts chunk
             r3 = ws.receive_json()
-            assert r3["is_final"] is True
+            assert r3["type"] == "audio"
+            assert r3["audio"] == "bW9jaw=="
+            assert r3["is_final"] is False
+            # 第4个: tts final
+            r4 = ws.receive_json()
+            assert r4["type"] == "audio"
+            assert r4["is_final"] is True

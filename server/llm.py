@@ -15,12 +15,18 @@ class LLMError(Exception):
     """LLM 调用失败"""
 
 
-async def ask_llm_stream(prompt: str, system_prompt: str = None):
+async def ask_llm_stream(
+    prompt: str,
+    system_prompt: str | None = None,
+    messages: list[dict] | None = None,
+):
     """流式调用 DeepSeek-V3，逐 chunk yield 文本"""
-    messages = []
+    all_messages = []
     if system_prompt:
-        messages.append({"role": "system", "content": system_prompt})
-    messages.append({"role": "user", "content": prompt})
+        all_messages.append({"role": "system", "content": system_prompt})
+    if messages:
+        all_messages.extend(messages)
+    all_messages.append({"role": "user", "content": prompt})
 
     headers = {
         "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
@@ -28,7 +34,7 @@ async def ask_llm_stream(prompt: str, system_prompt: str = None):
     }
     payload = {
         "model": DEEPSEEK_MODEL,
-        "messages": messages,
+        "messages": all_messages,
         "stream": True,
     }
 
@@ -62,9 +68,9 @@ async def ask_llm_stream(prompt: str, system_prompt: str = None):
     logger.info("LLM done: elapsed=%.2fs, model=%s", elapsed, DEEPSEEK_MODEL)
 
 
-async def ask_llm(prompt: str, system_prompt: str = None) -> str:
+async def ask_llm(prompt: str, system_prompt: str | None = None, messages: list[dict] | None = None) -> str:
     """非流式汇总，返回完整文本"""
     parts = []
-    async for chunk in ask_llm_stream(prompt, system_prompt):
+    async for chunk in ask_llm_stream(prompt, system_prompt=system_prompt, messages=messages):
         parts.append(chunk)
     return "".join(parts)
