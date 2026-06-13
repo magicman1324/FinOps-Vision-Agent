@@ -38,7 +38,6 @@ app = FastAPI(title="AI Vision Dialogue", version="0.4.0")
 # 每连接状态
 _images: dict[int, str] = {}
 _memories: dict[int, ConversationMemory] = {}
-_queues: dict[int, asyncio.Queue] = {}
 # 三级降级链最终兜底文案
 FALLBACK_PRESET = "抱歉，我暂时无法处理这个问题，请稍后再试"
 
@@ -64,21 +63,7 @@ async def websocket_endpoint(ws: WebSocket):
     await ws.accept()
     cid = _cid(ws)
     trace = str(uuid.uuid4())[:8]
-    q: asyncio.Queue = asyncio.Queue()
-    _queues[cid] = q
     logger.info("WebSocket connected cid=%d trace=%s", cid, trace)
-
-    async def _audio_worker():
-        """串行处理音频消息，保证 FIFO 顺序"""
-        while True:
-            item = await q.get()
-            if item is None:  # 停止信号
-                break
-            data, seq = item
-            await _handle_audio(ws, data, trace, seq)
-
-    worker = asyncio.create_task(_audio_worker())
-
     try:
         while True:
             raw = await ws.receive_text()
@@ -92,7 +77,7 @@ async def websocket_endpoint(ws: WebSocket):
 
             if msg_type == "audio":
                 seq = data.get("seq", 0)
-                await q.put((data, seq))
+                await _handle_audio(ws, data, trace, seq)
             elif msg_type == "image":
                 await _handle_visual(ws, data, trace)
             else:
@@ -100,11 +85,8 @@ async def websocket_endpoint(ws: WebSocket):
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected cid=%d trace=%s", cid, trace)
     finally:
-        await q.put(None)  # 停止 worker
-        await worker
         _images.pop(cid, None)
         _memories.pop(cid, None)
-        _queues.pop(cid, None)
 
 
 async def _handle_audio(ws: WebSocket, data: AudioMessage, trace: str = "-", seq: int = 0):
