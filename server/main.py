@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from server.asr import ASRError, speech_to_text
 from server.llm import LLMError, ask_llm
 from server.memory import ConversationMemory
-from server.router import classify_intent_l0, classify_intent_l1
+from server.router import classify_intent_l0
 from server.tts import TTSError, text_to_speech_stream
 from server.vlm import VLMError, image_to_text
 
@@ -109,10 +109,8 @@ async def _handle_audio(ws: WebSocket, data: AudioMessage, trace: str = "-", seq
 
     await ws.send_json({"type": "asr_result", "text": text})
 
-    # 2. 意图分类 (L0 正则 → L1 LLM 兜底) + 三级降级推理
+    # 2. 意图分类 (L0 正则，22 条视觉关键词覆盖) + 三级降级推理
     intent = classify_intent_l0(text)
-    if intent == "textual":
-        intent = await classify_intent_l1(text)
     image = _images.get(_cid(ws))
     memory = _get_memory(ws)
 

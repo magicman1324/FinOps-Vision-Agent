@@ -1,6 +1,6 @@
 """pytest 共享 fixture"""
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -21,6 +21,5 @@ def _mock_llm():
 
     with (
         patch("server.main.ask_llm", new=_mock_ask_llm),
-        patch("server.main.classify_intent_l1", new=AsyncMock(return_value="textual")),
     ):
         yield

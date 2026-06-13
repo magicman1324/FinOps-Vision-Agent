@@ -412,15 +412,14 @@ class TestCrossCutting:
                 ws.receive_json()  # text_result
                 ws.receive_json()  # TTS final
 
-    def test_l1_router_fallback_to_visual(self, client):
-        """L0 未命中 → L1 LLM 识别为 visual → VLM 路径"""
+    def test_l0_miss_goes_textual(self, client):
+        """L0 未命中 → textual 路径 (L1 已移除，无 LLM 二分类兜底)"""
         pcm = base64.b64encode(b"\x00" * 32000).decode()
         fake_jpeg = base64.b64encode(b"\xff\xd8\xff\xe0" + b"\x00" * 100).decode()
         from unittest.mock import patch
 
         with (
             patch("server.main.speech_to_text", return_value="这东西挺贵的"),
-            patch("server.main.classify_intent_l1", return_value="visual"),
             patch("server.main.image_to_text", return_value="画面中有奢侈品"),
             patch("server.main.text_to_speech_stream",
                   return_value=_async_gen({"type": "audio", "audio": "", "is_final": True})),
@@ -431,7 +430,9 @@ class TestCrossCutting:
 
                 ws.send_json({"type": "audio", "audio": pcm})
                 assert ws.receive_json()["type"] == "asr_result"
-                ws.receive_json()
+                r_text = ws.receive_json()
+                assert r_text["type"] == "text_result"
+                assert "mock response" in r_text["text"]
 
     def test_memory_compress_triggered(self, client):
         """多轮对话触发记忆异步压缩"""
