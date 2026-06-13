@@ -184,7 +184,7 @@ audio { display: none; }
 
 <script src="vad.js?v=5"></script>
 <script src="camera.js?v=2"></script>
-<script src="websocket.js?v=4"></script>
+<script src="websocket.js?v=5"></script>
 <script>
 const camera = document.getElementById('camera');
 const statusDot = document.getElementById('status-dot');
@@ -272,7 +272,11 @@ async function initCamera() {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
       video: { width: 640, height: 480 },
-      audio: true
+      audio: {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false
+      }
     });
     camera.srcObject = stream;
     addBubble('摄像头/麦克风就绪', 'system');
