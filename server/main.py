@@ -33,7 +33,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="AI Vision Dialogue", version="0.3.1")
+app = FastAPI(title="AI Vision Dialogue", version="0.4.0")
 
 # 每连接状态
 _images: dict[int, str] = {}
