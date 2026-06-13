@@ -72,34 +72,34 @@ pytest tests/test_cascade.py -v
 # 跑单个测试函数
 pytest tests/test_router.py::TestL0VisualHits::test_color_inquiry -v
 
-# 跑真实 API 测试（需要 DASHSCOPE_API_KEY 环境变量）
-DASHSCOPE_API_KEY=sk-xxx pytest tests/test_live.py -v
+# 跑真实 API 测试（需要 DASHSCOPE_API_KEY + DEEPSEEK_API_KEY 环境变量）
+DASHSCOPE_API_KEY=sk-xxx DEEPSEEK_API_KEY=sk-xxx pytest tests/test_live.py -v
 ```
 
 ### 技术栈
 
 - **前端：** 纯 HTML5 + JavaScript，getUserMedia 捕获音视频，RMS 能量 VAD + 环形缓冲区
 - **后端：** Python + FastAPI + WebSocket，全双工通信
-- **AI 引擎：** DashScope ASR（通义听悟 paraformer-realtime-v2）→ CosyVoice TTS v2 流式合成
-- **测试：** pytest + pytest-asyncio，asyncio_mode=auto
-- **CI：** GitHub Actions ubuntu-latest，unit job（每次 push/PR）+ live job（仅 PR，需 secret）
+- **AI 引擎：** DashScope ASR（通义听悟 fun-asr-realtime）→ DeepSeek LLM（deepseek-chat）→ Qwen-VL-Max 视觉 → CosyVoice v1 TTS 流式合成（longxiaochun 音色，MP3 16kHz mono 128kbps）
+- **测试：** pytest + pytest-asyncio，asyncio_mode=auto（~121 条用例）
+- **CI：** GitHub Actions ubuntu-latest，unit job（每次 push/PR 跑 mock 测试）+ live job（仅 PR，需 DASHSCOPE_API_KEY + DEEPSEEK_API_KEY secret）
 
 ### 架构总览
 
 ```
 浏览器 (index.html)
-├── vad.js        — RMS VAD + 环形缓冲区，检测语音起止
+├── vad.js        — RMS VAD + 5s 环形缓冲 + 相对阈值噪音裁剪 + 音量回调
 ├── camera.js     — Canvas 512x512 截图, JPEG q=0.7 → Base64
-└── websocket.js  — WS 通信 + PCM 编码 + 指数退避重连 (max 10次)
+└── websocket.js  — WS 通信 + PCM 动态归一化编码（-6dBFS, max 20x gain）+ 指数退避重连 (max 10次)
 
-后端 (server/main.py, FastAPI WebSocket 单端点 /ws)
-├── asr.py        — DashScope 通义听悟 paraformer-realtime-v2
-├── router.py     — L0 关键词正则 (22 patterns) + L1 LLM 二分类兜底
-├── vlm.py        — Qwen-VL-Max 视觉推理 (sync, 无流式)
-├── llm.py        — DeepSeek-V3 流式文本生成 (httpx SSE)
-├── tts.py        — CosyVoice v2 流式 TTS (asyncio.Queue 桥接回调)
+后端 (server/main.py, FastAPI WebSocket 单端点 /ws + StaticFiles 静态文件 mount)
+├── asr.py        — DashScope fun-asr-realtime，非流式 call() 解析返回值
+├── router.py     — L0 关键词正则 (22+ patterns) + L1 LLM 二分类兜底
+├── vlm.py        — Qwen-VL-Max 视觉推理 (asyncio.to_thread 包装同步调用)
+├── llm.py        — DeepSeek deepseek-chat 流式文本生成 (httpx SSE, trust_env=False)
+├── tts.py        — CosyVoice v1 流式 TTS (asyncio.Queue 桥接同步回调)
 ├── memory.py     — 三层语义压缩 (short 3轮 → mid 摘要 → bg ≤150字)
-└── config.py     — 环境变量 (DASHSCOPE_API_KEY, DEEPSEEK_API_KEY)
+└── config.py     — 环境变量 + 代理剥离 + Windows SelectorEventLoop
 
 推理链路: audio → ASR → L0/L1意图路由 → 三级降级链 → TTS流式推送
 三级降级: _cascade_visual (VLM→LLM→预设文案) / _cascade_text (LLM→预设文案)
@@ -116,13 +116,16 @@ DASHSCOPE_API_KEY=sk-xxx pytest tests/test_live.py -v
 ### 核心架构模式
 
 **TTS 回调→async generator 桥接** (`server/tts.py`)：
-DashScope TTS v2 使用同步回调 `ResultCallback.on_data(bytes)` 交付音频。通过 `asyncio.Queue` 将回调解耦为 `async for chunk in text_to_speech_stream(text)` 的流式生成器。
+CosyVoice v1 使用 `streaming_call()` + `streaming_complete()`，同步回调 `ResultCallback.on_data(bytes)` 交付 MP3 音频。通过 `asyncio.Queue` 将回调解耦为 `async for chunk in text_to_speech_stream(text)` 的流式生成器。音色 `longxiaochun`，格式 MP3_16000HZ_MONO_128KBPS。
 
-**ASR 回调收集** (`server/asr.py`)：
-`RecognitionCallback.on_event(RecognitionResult)` 逐句收集文本，`call()` 结束后返回拼接结果。
+**ASR 直接调用** (`server/asr.py`)：
+DashScope `Recognition.call()` 是同步阻塞调用，返回 `RecognitionResult`（不使用 callback）。解析 `result.output["sentence"]`（兼容 dict/list 两种格式）拼接文本。前 10 条音频自动保存为 WAV 到 `%TEMP%/xengineer3_debug/` 便于调试。
 
 **VAD 能量检测** (`client/vad.js`)：
-RMS 阈值 + 连续帧计数判定语音起止。`start` 时从环形缓冲区回溯 300ms，`end`（静音 >1.5s）触发 `onSpeechEnd(pcmFloat32Array)` 回调。
+RMS 能量阈值（0.008）+ 单帧触发（SPEECH_FRAMES_MIN=1）检测语音起止。环形缓冲区 5 秒，`start` 时回溯 1.2s（覆盖 VAD 检测延迟），`end`（静音 >2.0s）触发 `onSpeechEnd(pcmFloat32Array)`。
+- 最短语音过滤：<0.4s 视为噪声丢弃
+- 静音裁剪：取前 0.3s 估计底噪，阈值 = 3×底噪（min 0.0001），头尾各留 200ms padding 保护清辅音（p/t/k/s/sh/x/h/f）
+- 音量回调：每 5 帧触发 `onVolume(rms)` 驱动 UI 音量条
 
 **L0/L1 双层意图路由** (`server/router.py`)：
 L0 用 22 个中文正则零延迟匹配视觉关键词（"这是什么"、"什么颜色"、空间方位等）。L0 未命中时 L1 用 LLM 二分类兜底（prompt 约束只输出 "visual"/"textual"）。
@@ -137,16 +140,42 @@ Short 窗口（3 轮完整对话）→ evict 时 raw text 推入 Mid（最多 7 
 
 ```
 前端 → 后端:
-  {"type": "audio", "audio": "<base64_pcm_16khz_mono>"}
-  {"type": "image", "image": "<base64_jpeg>"}
+  {"type": "audio", "audio": "<base64_int16le_pcm_16khz_mono>"}  ← Int16LE, 动态峰值归一化
+  {"type": "image", "image": "<base64_jpeg>"}                     ← 512x512, q=0.7
 
 后端 → 前端:
-  {"type": "asr_result", "text": "用户说的话"}
-  {"type": "vlm_result", "text": "画面描述"}
-  {"type": "audio", "audio": "<base64>", "is_final": false}   ← TTS chunk, 无 type 字段
-  {"type": "audio", "audio": "", "is_final": true}            ← TTS 完成
-  {"type": "error", "message": "抱歉..."}                      ← 降级通知
-  {"type": "echo", "data": {...}}                             ← 未知消息类型回显
+  {"type": "asr_result", "text": "用户说的话"}                    ← 带 type 字段
+  {"type": "vlm_result", "text": "画面描述"}                      ← 带 type 字段
+  {"audio": "<base64>", "is_final": false}                       ← TTS chunk, 无 type 字段
+  {"audio": "", "is_final": true}                                ← TTS 完成
+  {"type": "error", "message": "抱歉..."}                        ← 降级通知
+  {"type": "echo", "data": {...}}                               ← 未知消息类型回显
+```
+
+### 配置环境变量
+
+```bash
+# DashScope — ASR / VLM / TTS
+DASHSCOPE_API_KEY=sk-xxx
+DASHSCOPE_ASR_MODEL=fun-asr-realtime
+DASHSCOPE_TTS_MODEL=cosyvoice-v1
+DASHSCOPE_VLM_MODEL=qwen-vl-max
+
+# DeepSeek — LLM 文本生成 + 意图分类
+DEEPSEEK_API_KEY=sk-xxx
+DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
+DEEPSEEK_MODEL=deepseek-chat
+
+# 超时（秒）
+ASR_TIMEOUT=10
+VLM_TIMEOUT=15
+LLM_TIMEOUT=10
+TTS_TIMEOUT=10
+
+# 图像压缩
+IMAGE_MAX_WIDTH=512
+IMAGE_MAX_HEIGHT=512
+IMAGE_QUALITY=0.7
 ```
 
 ## 编码规范
@@ -156,15 +185,19 @@ Short 窗口（3 轮完整对话）→ evict 时 raw text 推入 Mid（最多 7 
 - 每个 AI API 调用必须 try/catch，失败通过 WebSocket 发送 `{“type”:”error”,”message”:”...”}` 降级
 - 流式生成器用 `async def` + `yield`，TTS 模式见上
 - API Key 走 `os.getenv()` / `python-dotenv`，禁止硬编码。配置常量集中在 `server/config.py`
-- 日志用 `logging` 模块，关键节点（ASR 耗时/TTFB/Token 消耗）必须打点
+- `config.py` 导入时自动剥离 `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY` 环境变量，防止 httpx/dashscope 走系统代理
+- `llm.py` 的 httpx client 设置 `trust_env=False` 双重保险直连 DeepSeek
+- 日志用 `logging` 模块，关键节点（ASR 耗时/意图分类/TTS TTFB）必须打点
+- pre-commit hook: detect-private-key + check-added-large-files + detect-dashscope-key（扫描 `sk-[a-zA-Z0-9]{16,}` 防止 API Key 泄露）
 - pytest fixture 收敛到 `tests/conftest.py`；`client` fixture 已在 conftest 定义，module 级不要重复定义
 - `tests/conftest.py::_mock_llm` 是 autouse fixture，全局 mock `server.main.ask_llm`。写新测试时注意：需要 LLM 失败路径时，显式 `patch("server.main.ask_llm", side_effect=LLMError(...))` 覆盖
 
 ### 前端 JS
 
-- UI：摄像头预览 + 底部状态栏（绿/黄/红）+ 日志区，无框架
-- VAD 参数（`RMS_THRESHOLD`/`SILENCE_TIMEOUT_SEC`/`LOOKBACK_SEC`）顶部大写常量
-- 图片压缩：`camera.js` 512x512 Canvas resize，JPEG q=0.7，`captureDataURL()` 用于预览
+- UI：摄像头预览 + 底部状态栏（绿/黄/红）+ 音量条 + 聊天气泡，纯 CSS 无框架
+- VAD 参数（`RMS_THRESHOLD`/`SILENCE_TIMEOUT_SEC`/`LOOKBACK_SEC`/`SPEECH_FRAMES_MIN`/`MIN_SPEECH_SEC`）顶部大写常量
+- 图片压缩：`camera.js` Canvas 512x512 resize，JPEG q=0.7 → Base64（无 data: 前缀）
+- PCM 编码：`websocket.js` Float32 → Int16LE，动态峰值归一化（目标 -6dBFS，max 20x gain）
 - WS 重连：`websocket.js` 指数退避 (500ms→10s)，最大 10 次重试，超限通知 UI
 
 ### 注释约束
