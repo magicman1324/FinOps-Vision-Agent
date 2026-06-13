@@ -187,7 +187,10 @@ async def _cascade_visual(image: str, question: str, memory: ConversationMemory)
             f"用户正在使用摄像头看东西，问: {question}\n"
             "你暂时看不到画面，但请根据常识尽量回答。如果你无法回答，请友好地告知用户。"
         )
-        return await ask_llm(llm_prompt, system_prompt=ctx if ctx else None)
+        history = memory.get_short_history()
+        bg = memory.bg_summary
+        system = f"你是一个语音对话助手。{bg}" if bg else None
+        return await ask_llm(llm_prompt, system_prompt=system, messages=history)
     except LLMError:
         logger.warning("LLM also failed, using preset fallback")
 
@@ -197,11 +200,13 @@ async def _cascade_visual(image: str, question: str, memory: ConversationMemory)
 
 async def _cascade_text(question: str, memory: ConversationMemory) -> str:
     """L1 LLM → L2 预设文案"""
-    ctx = memory.get_context()
+    history = memory.get_short_history()
+    bg = memory.bg_summary
+    system = f"你是一个语音对话助手。{bg}" if bg else None
 
     # L1: LLM
     try:
-        return await ask_llm(question, system_prompt=ctx if ctx else None)
+        return await ask_llm(question, system_prompt=system, messages=history)
     except LLMError:
         logger.warning("LLM failed, using preset fallback")
 
