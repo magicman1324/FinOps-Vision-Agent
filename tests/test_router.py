@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from server.router import classify_intent, classify_intent_l0, classify_intent_l1
+from server.router import classify_intent_l0, classify_intent_l1
 
 
 class TestL0VisualHits:
@@ -120,9 +120,3 @@ class TestL1LLMClassification:
             assert result == "visual"
 
 
-class TestBackwardCompat:
-    """向后兼容：classify_intent 仍可用"""
-
-    def test_alias_works(self):
-        assert classify_intent("这是什么") == "visual"
-        assert classify_intent("你好") == "textual"

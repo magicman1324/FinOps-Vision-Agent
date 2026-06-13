@@ -3,6 +3,8 @@
 import asyncio
 import json
 import logging
+import uuid
+from typing import TypedDict
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
@@ -12,6 +14,17 @@ from server.memory import ConversationMemory
 from server.router import classify_intent_l0, classify_intent_l1
 from server.tts import TTSError, text_to_speech_stream
 from server.vlm import VLMError, image_to_text
+
+
+class AudioMessage(TypedDict):
+    type: str
+    audio: str
+
+
+class ImageMessage(TypedDict):
+    type: str
+    image: str
+
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
@@ -48,7 +61,8 @@ async def health():
 async def websocket_endpoint(ws: WebSocket):
     await ws.accept()
     cid = _cid(ws)
-    logger.info("WebSocket connected cid=%d", cid)
+    trace = str(uuid.uuid4())[:8]
+    logger.info("WebSocket connected cid=%d trace=%s", cid, trace)
     try:
         while True:
             raw = await ws.receive_text()
@@ -61,19 +75,19 @@ async def websocket_endpoint(ws: WebSocket):
             msg_type = data.get("type", "")
 
             if msg_type == "audio":
-                await _handle_audio(ws, data)
+                await _handle_audio(ws, data, trace)
             elif msg_type == "image":
-                await _handle_visual(ws, data)
+                await _handle_visual(ws, data, trace)
             else:
                 await ws.send_json({"type": "echo", "data": data})
     except WebSocketDisconnect:
-        logger.info("WebSocket disconnected cid=%d", cid)
+        logger.info("WebSocket disconnected cid=%d trace=%s", cid, trace)
     finally:
         _images.pop(cid, None)
         _memories.pop(cid, None)
 
 
-async def _handle_audio(ws: WebSocket, data: dict):
+async def _handle_audio(ws: WebSocket, data: AudioMessage, trace: str = "-"):
     """音频: ASR → 意图路由 → 三级降级推理 → TTS → 记忆"""
     audio_b64 = data.get("audio", "")
     if not audio_b64:
@@ -100,8 +114,8 @@ async def _handle_audio(ws: WebSocket, data: dict):
     image = _images.get(_cid(ws))
     memory = _get_memory(ws)
 
-    logger.info("intent=%s has_image=%s turns=%d text=%r",
-                intent, bool(image), memory.turn_count, text[:80])
+    logger.info("trace=%s intent=%s has_image=%s turns=%d text=%r",
+                trace, intent, bool(image), memory.turn_count, text[:80])
 
     if intent == "visual" and image:
         response = await _cascade_visual(image, text, memory)
@@ -125,7 +139,7 @@ async def _handle_audio(ws: WebSocket, data: dict):
         await ws.send_json({"type": "error", "message": "抱歉，语音合成失败了"})
 
 
-async def _handle_visual(ws: WebSocket, data: dict):
+async def _handle_visual(ws: WebSocket, data: ImageMessage, trace: str = "-"):
     """图片: 缓存最新帧 + VLM 描述"""
     image_b64 = data.get("image", "")
     if not image_b64:
