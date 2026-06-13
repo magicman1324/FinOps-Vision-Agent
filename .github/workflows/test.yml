@@ -46,4 +46,5 @@ jobs:
       - name: Run live API tests
         env:
           DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: python -m pytest tests/test_live.py -v
