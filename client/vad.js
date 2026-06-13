@@ -10,12 +10,12 @@
 const VAD_SAMPLE_RATE = 16000;
 const BUFFER_SIZE = 4096;
 const RING_BUFFER_SEC = 3;          // 环形缓冲区 3 秒
-const LOOKBACK_SEC = 0.8;           // 回溯 800ms (覆盖 VAD 3帧检测延迟 ~0.77s)
+const LOOKBACK_SEC = 1.2;           // 回溯 1.2s (VAD 延迟 0.77s + 余量)
 const SILENCE_TIMEOUT_SEC = 1.0;    // 静音 1.0s 判定结束
 const RMS_THRESHOLD = 0.01;         // RMS 能量阈值
-const SPEECH_FRAMES_MIN = 3;        // 连续 N 帧高于阈值才判定 speech start
-const MIN_SPEECH_SEC = 0.5;         // 最短有效语音时长（短于此视为噪声）
-const TRIM_THRESHOLD = 0.001;       // 裁剪静音阈值（低于此值视为静音）
+const SPEECH_FRAMES_MIN = 2;        // 连续 N 帧高于阈值才判定 speech start
+const MIN_SPEECH_SEC = 0.4;         // 最短有效语音时长（短于此视为噪声）
+const TRIM_THRESHOLD = 0.0005;      // 裁剪静音阈值
 
 let audioCtx = null;
 let streamNode = null;
