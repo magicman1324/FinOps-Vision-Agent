@@ -7,9 +7,10 @@ import os
 import sys
 import tempfile
 import time
+import wave
 
 import dashscope
-from dashscope.audio.asr import Recognition, RecognitionCallback, RecognitionResult
+from dashscope.audio.asr import Recognition, RecognitionResult
 
 from server.config import DASHSCOPE_API_KEY, DASHSCOPE_ASR_MODEL, ASR_TIMEOUT
 
@@ -24,21 +25,9 @@ for _key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_prox
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-
-class _TextCollector(RecognitionCallback):
-    """收集 ASR 识别结果"""
-
-    def __init__(self):
-        self.text = ""
-
-    def on_event(self, result: RecognitionResult) -> None:
-        sentence = result.get_sentence()
-        if sentence and sentence.text:
-            self.text += sentence.text
-
-    def on_error(self, result: RecognitionResult) -> None:
-        logger.error("ASR error: %s", result)
-        raise ASRError(f"ASR recognition failed: {result}")
+_debug_audio_dir = os.path.join(tempfile.gettempdir(), "xengineer3_debug")
+os.makedirs(_debug_audio_dir, exist_ok=True)
+_debug_save_count = 0
 
 
 class ASRError(Exception):
@@ -55,25 +44,50 @@ def speech_to_text(audio_base64: str) -> str:
     Returns:
         识别出的文本
     """
+    global _debug_save_count
     audio_bytes = base64.b64decode(audio_base64)
     duration = len(audio_bytes) / 32000  # 16kHz 16bit mono = 32000 bytes/s
     logger.info("ASR audio: %d bytes (%.1fs)", len(audio_bytes), duration)
 
-    collector = _TextCollector()
+    if _debug_save_count < 10:
+        _debug_save_count += 1
+        ts = int(time.time() * 1000)
+        wav_path = os.path.join(_debug_audio_dir, f"asr_{ts}_{len(audio_bytes)}.wav")
+        with wave.open(wav_path, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)  # 16-bit
+            wf.setframerate(16000)
+            wf.writeframes(audio_bytes)
+        logger.info("ASR debug: saved %s", wav_path)
+
     recognition = Recognition(
         model=DASHSCOPE_ASR_MODEL,
         format="pcm",
         sample_rate=16000,
-        callback=collector,
+        callback=None,
     )
     start = time.monotonic()
     with tempfile.NamedTemporaryFile(suffix=".pcm", delete=False) as tmp:
         tmp.write(audio_bytes)
         tmp_path = tmp.name
     try:
-        recognition.call(tmp_path)
+        result = recognition.call(tmp_path)
     finally:
         os.unlink(tmp_path)
     elapsed = time.monotonic() - start
-    logger.info("ASR done: text=%r, elapsed=%.2fs", collector.text, elapsed)
-    return collector.text
+
+    if result.status_code != 200:
+        logger.error("ASR API error: code=%s message=%s", result.code, result.message)
+        raise ASRError(f"ASR failed: {result.code} - {result.message}")
+
+    text = ""
+    output = result.output if isinstance(result.output, dict) else {}
+    sentences = output.get("sentence", [])
+    if isinstance(sentences, dict):
+        sentences = [sentences]
+    for s in sentences:
+        if isinstance(s, dict) and s.get("text"):
+            text += s["text"]
+
+    logger.info("ASR done: text=%r, elapsed=%.2fs", text, elapsed)
+    return text

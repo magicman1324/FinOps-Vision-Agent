@@ -27,7 +27,7 @@ function onStatus(cb) { onStatusCb = cb; }
  * Float32Array PCM [-1,1] → Base64 (Int16 LE)
  */
 function pcmToBase64(pcm) {
-  const GAIN = 4.0;  // 麦克风音量太低，放大 4 倍
+  const GAIN = 2.0;  // 适度放大，避免削峰
   const int16 = new Int16Array(pcm.length);
   let peak = 0;
   for (let i = 0; i < pcm.length; i++) {

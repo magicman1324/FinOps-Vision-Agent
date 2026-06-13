@@ -11,9 +11,10 @@ const VAD_SAMPLE_RATE = 16000;
 const BUFFER_SIZE = 4096;
 const RING_BUFFER_SEC = 3;          // 环形缓冲区 3 秒
 const LOOKBACK_SEC = 0.3;           // 回溯 300ms
-const SILENCE_TIMEOUT_SEC = 1.5;    // 静音 1.5s 判定结束
+const SILENCE_TIMEOUT_SEC = 2.0;    // 静音 2.0s 判定结束
 const RMS_THRESHOLD = 0.01;         // RMS 能量阈值
 const SPEECH_FRAMES_MIN = 3;        // 连续 N 帧高于阈值才判定 speech start
+const MIN_SPEECH_SEC = 0.8;         // 最短有效语音时长（短于此视为噪声）
 
 let audioCtx = null;
 let streamNode = null;
@@ -117,8 +118,12 @@ function processFrame(samples) {
           // 回溯 LOOKBACK_SEC + 从 start 到现在的全部音频
           const durSinceStart = (ringWritePos - speechStartPos + ringBuffer.length) % ringBuffer.length / VAD_SAMPLE_RATE;
           const totalSec = Math.min(durSinceStart + LOOKBACK_SEC, RING_BUFFER_SEC);
-          const audio = ringRead(totalSec);
-          onSpeechEndCb(audio);
+          if (totalSec >= MIN_SPEECH_SEC) {
+            const audio = ringRead(totalSec);
+            onSpeechEndCb(audio);
+          } else {
+            console.log('[VAD] speech_too_short (%.2fs < %.2fs), ignoring', totalSec, MIN_SPEECH_SEC);
+          }
         }
       }
     } else {
