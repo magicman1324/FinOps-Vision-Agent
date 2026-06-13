@@ -77,6 +77,8 @@ def test_asr_live():
 
         result = speech_to_text(audio_b64)
         assert isinstance(result, str), "ASR 未返回文本"
+        # 注意: 测试用纯正弦波不是语音，ASR 返回空字符串是正常行为
+        # 本测试只验证 API 调用不抛异常
     finally:
         os.unlink(pcm_path)
 

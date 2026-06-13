@@ -135,16 +135,28 @@ function startVAD(stream) {
   audioCtx = new (window.AudioContext || window.webkitAudioContext)({
     sampleRate: VAD_SAMPLE_RATE,
   });
+  const actualRate = audioCtx.sampleRate;
+  console.log('[VAD] requested=%dHz actual=%dHz mismatch=%s',
+    VAD_SAMPLE_RATE, actualRate, VAD_SAMPLE_RATE !== actualRate ? 'YES' : 'no');
+
   streamNode = audioCtx.createMediaStreamSource(stream);
 
   processor = audioCtx.createScriptProcessor(BUFFER_SIZE, 1, 1);
   processor.onaudioprocess = (e) => {
     const input = e.inputBuffer.getChannelData(0);
+    // 打印一次 RMS 用于诊断音量
+    if (!processor._rmsLogged) {
+      processor._rmsLogged = true;
+      let sum = 0;
+      for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
+      const rms = Math.sqrt(sum / input.length);
+      console.log('[VAD] first frame: rms=%.5f samples=%d', rms, input.length);
+    }
     processFrame(new Float32Array(input));
   };
   streamNode.connect(processor);
   processor.connect(audioCtx.destination);
-  console.log('[VAD] started (sampleRate=%d, buffer=%d)', VAD_SAMPLE_RATE, BUFFER_SIZE);
+  console.log('[VAD] started (buffer=%d)', BUFFER_SIZE);
 
   return audioCtx;
 }
