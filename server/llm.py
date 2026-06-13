@@ -33,7 +33,7 @@ async def ask_llm_stream(prompt: str, system_prompt: str = None):
     }
 
     start = time.monotonic()
-    async with httpx.AsyncClient(timeout=LLM_TIMEOUT) as client:
+    async with httpx.AsyncClient(timeout=LLM_TIMEOUT, proxy=None) as client:
         async with client.stream(
             "POST",
             f"{DEEPSEEK_BASE_URL}/chat/completions",
