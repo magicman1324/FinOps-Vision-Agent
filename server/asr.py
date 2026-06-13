@@ -1,8 +1,10 @@
 """DashScope 通义听悟 ASR — 语音转文本"""
 
+import asyncio
 import base64
 import logging
 import os
+import sys
 import tempfile
 import time
 
@@ -17,6 +19,10 @@ dashscope.api_key = DASHSCOPE_API_KEY
 # 清除系统代理 — dashscope 内部用 aiohttp，会读 HTTP_PROXY
 for _key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
     os.environ.pop(_key, None)
+
+# Windows: ProactorEventLoop SSL 有 bug，切 Selector
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 
 class _TextCollector(RecognitionCallback):

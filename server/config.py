@@ -1,9 +1,19 @@
 """应用配置，从环境变量加载"""
 
+import asyncio
 import os
+import sys
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# 清除系统代理 — dashscope/httpx 内部读 HTTP_PROXY 会走代理
+for _key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+    os.environ.pop(_key, None)
+
+# Windows: ProactorEventLoop SSL 兼容问题，切 Selector
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY", "")
 DASHSCOPE_ASR_MODEL = os.getenv("DASHSCOPE_ASR_MODEL", "paraformer-realtime-v2")
