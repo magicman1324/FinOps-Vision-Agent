@@ -3,10 +3,12 @@
 import asyncio
 import json
 import logging
+import os
 import uuid
 from typing import TypedDict
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.staticfiles import StaticFiles
 
 from server.asr import ASRError, speech_to_text
 from server.llm import LLMError, ask_llm
@@ -36,6 +38,7 @@ app = FastAPI(title="AI Vision Dialogue", version="0.3.1")
 # 每连接状态
 _images: dict[int, str] = {}
 _memories: dict[int, ConversationMemory] = {}
+_processing: set[int] = set()  # 正在处理音频的连接，防止排队
 
 # 三级降级链最终兜底文案
 FALLBACK_PRESET = "抱歉，我暂时无法处理这个问题，请稍后再试"
@@ -89,54 +92,63 @@ async def websocket_endpoint(ws: WebSocket):
 
 async def _handle_audio(ws: WebSocket, data: AudioMessage, trace: str = "-"):
     """音频: ASR → 意图路由 → 三级降级推理 → TTS → 记忆"""
-    audio_b64 = data.get("audio", "")
-    if not audio_b64:
-        await ws.send_json({"type": "error", "message": "missing audio field"})
+    cid = _cid(ws)
+    if cid in _processing:
+        logger.info("trace=%s audio skipped (already processing)", trace)
         return
+    _processing.add(cid)
 
-    # 1. 语音识别
     try:
-        text = speech_to_text(audio_b64)
-    except ASRError:
-        await ws.send_json({"type": "error", "message": "抱歉，我没听清，请再说一次"})
-        return
+        audio_b64 = data.get("audio", "")
+        if not audio_b64:
+            await ws.send_json({"type": "error", "message": "missing audio field"})
+            return
 
-    if not text.strip():
-        await ws.send_json({"type": "error", "message": "未识别到语音内容"})
-        return
+        # 1. 语音识别
+        try:
+            text = speech_to_text(audio_b64)
+        except ASRError:
+            await ws.send_json({"type": "error", "message": "抱歉，我没听清，请再说一次"})
+            return
 
-    await ws.send_json({"type": "asr_result", "text": text})
+        if not text.strip():
+            await ws.send_json({"type": "error", "message": "未识别到语音内容"})
+            return
 
-    # 2. 意图分类 (L0 正则 → L1 LLM 兜底) + 三级降级推理
-    intent = classify_intent_l0(text)
-    if intent == "textual":
-        intent = await classify_intent_l1(text)
-    image = _images.get(_cid(ws))
-    memory = _get_memory(ws)
+        await ws.send_json({"type": "asr_result", "text": text})
 
-    logger.info("trace=%s intent=%s has_image=%s turns=%d text=%r",
-                trace, intent, bool(image), memory.turn_count, text[:80])
+        # 2. 意图分类 (L0 正则 → L1 LLM 兜底) + 三级降级推理
+        intent = classify_intent_l0(text)
+        if intent == "textual":
+            intent = await classify_intent_l1(text)
+        image = _images.get(_cid(ws))
+        memory = _get_memory(ws)
 
-    if intent == "visual" and image:
-        response = await _cascade_visual(image, text, memory)
-    elif intent == "visual" and not image:
-        response = "我还没看到画面，请将摄像头对准你想问的东西"
-    else:
-        response = await _cascade_text(text, memory)
+        logger.info("trace=%s intent=%s has_image=%s turns=%d text=%r",
+                    trace, intent, bool(image), memory.turn_count, text[:80])
 
-    # 3. 记入记忆 + 异步压缩
-    memory.add_turn(text, response)
-    if memory.mid_count > 0 and not memory.mid_compressed:
-        asyncio.create_task(memory.compress_mid())
-    if memory.mid_compressed and memory.mid_count >= 2:
-        asyncio.create_task(memory.compress_background())
+        if intent == "visual" and image:
+            response = await _cascade_visual(image, text, memory)
+        elif intent == "visual" and not image:
+            response = "我还没看到画面，请将摄像头对准你想问的东西"
+        else:
+            response = await _cascade_text(text, memory)
 
-    # 4. TTS 语音合成
-    try:
-        async for chunk in text_to_speech_stream(response):
-            await ws.send_json(chunk)
-    except TTSError:
-        await ws.send_json({"type": "error", "message": "抱歉，语音合成失败了"})
+        # 3. 记入记忆 + 异步压缩
+        memory.add_turn(text, response)
+        if memory.mid_count > 0 and not memory.mid_compressed:
+            asyncio.create_task(memory.compress_mid())
+        if memory.mid_compressed and memory.mid_count >= 2:
+            asyncio.create_task(memory.compress_background())
+
+        # 4. TTS 语音合成
+        try:
+            async for chunk in text_to_speech_stream(response):
+                await ws.send_json(chunk)
+        except TTSError:
+            await ws.send_json({"type": "error", "message": "抱歉，语音合成失败了"})
+    finally:
+        _processing.discard(cid)
 
 
 async def _handle_visual(ws: WebSocket, data: ImageMessage, trace: str = "-"):
@@ -203,3 +215,8 @@ async def _cascade_text(question: str, memory: ConversationMemory) -> str:
 
     # L2: 预设文案
     return FALLBACK_PRESET
+
+
+# 静态文件 — 路由之后 mount，不覆盖 /health /ws
+_client_dir = os.path.join(os.path.dirname(__file__), "..", "client")
+app.mount("/", StaticFiles(directory=_client_dir, html=True), name="client")
