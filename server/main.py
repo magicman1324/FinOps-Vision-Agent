@@ -38,8 +38,6 @@ app = FastAPI(title="AI Vision Dialogue", version="0.3.1")
 # 每连接状态
 _images: dict[int, str] = {}
 _memories: dict[int, ConversationMemory] = {}
-_processing: set[int] = set()  # 正在处理音频的连接，防止排队
-
 # 三级降级链最终兜底文案
 FALLBACK_PRESET = "抱歉，我暂时无法处理这个问题，请稍后再试"
 
@@ -92,63 +90,54 @@ async def websocket_endpoint(ws: WebSocket):
 
 async def _handle_audio(ws: WebSocket, data: AudioMessage, trace: str = "-"):
     """音频: ASR → 意图路由 → 三级降级推理 → TTS → 记忆"""
-    cid = _cid(ws)
-    if cid in _processing:
-        logger.info("trace=%s audio skipped (already processing)", trace)
+    audio_b64 = data.get("audio", "")
+    if not audio_b64:
+        await ws.send_json({"type": "error", "message": "missing audio field"})
         return
-    _processing.add(cid)
 
+    # 1. 语音识别
     try:
-        audio_b64 = data.get("audio", "")
-        if not audio_b64:
-            await ws.send_json({"type": "error", "message": "missing audio field"})
-            return
+        text = speech_to_text(audio_b64)
+    except ASRError:
+        await ws.send_json({"type": "error", "message": "抱歉，我没听清，请再说一次"})
+        return
 
-        # 1. 语音识别
-        try:
-            text = speech_to_text(audio_b64)
-        except ASRError:
-            await ws.send_json({"type": "error", "message": "抱歉，我没听清，请再说一次"})
-            return
+    if not text.strip():
+        await ws.send_json({"type": "error", "message": "未识别到语音内容"})
+        return
 
-        if not text.strip():
-            await ws.send_json({"type": "error", "message": "未识别到语音内容"})
-            return
+    await ws.send_json({"type": "asr_result", "text": text})
 
-        await ws.send_json({"type": "asr_result", "text": text})
+    # 2. 意图分类 (L0 正则 → L1 LLM 兜底) + 三级降级推理
+    intent = classify_intent_l0(text)
+    if intent == "textual":
+        intent = await classify_intent_l1(text)
+    image = _images.get(_cid(ws))
+    memory = _get_memory(ws)
 
-        # 2. 意图分类 (L0 正则 → L1 LLM 兜底) + 三级降级推理
-        intent = classify_intent_l0(text)
-        if intent == "textual":
-            intent = await classify_intent_l1(text)
-        image = _images.get(_cid(ws))
-        memory = _get_memory(ws)
+    logger.info("trace=%s intent=%s has_image=%s turns=%d text=%r",
+                trace, intent, bool(image), memory.turn_count, text[:80])
 
-        logger.info("trace=%s intent=%s has_image=%s turns=%d text=%r",
-                    trace, intent, bool(image), memory.turn_count, text[:80])
+    if intent == "visual" and image:
+        response = await _cascade_visual(image, text, memory)
+    elif intent == "visual" and not image:
+        response = "我还没看到画面，请将摄像头对准你想问的东西"
+    else:
+        response = await _cascade_text(text, memory)
 
-        if intent == "visual" and image:
-            response = await _cascade_visual(image, text, memory)
-        elif intent == "visual" and not image:
-            response = "我还没看到画面，请将摄像头对准你想问的东西"
-        else:
-            response = await _cascade_text(text, memory)
+    # 3. 记入记忆 + 异步压缩
+    memory.add_turn(text, response)
+    if memory.mid_count > 0 and not memory.mid_compressed:
+        asyncio.create_task(memory.compress_mid())
+    if memory.mid_compressed and memory.mid_count >= 2:
+        asyncio.create_task(memory.compress_background())
 
-        # 3. 记入记忆 + 异步压缩
-        memory.add_turn(text, response)
-        if memory.mid_count > 0 and not memory.mid_compressed:
-            asyncio.create_task(memory.compress_mid())
-        if memory.mid_compressed and memory.mid_count >= 2:
-            asyncio.create_task(memory.compress_background())
-
-        # 4. TTS 语音合成
-        try:
-            async for chunk in text_to_speech_stream(response):
-                await ws.send_json(chunk)
-        except TTSError:
-            await ws.send_json({"type": "error", "message": "抱歉，语音合成失败了"})
-    finally:
-        _processing.discard(cid)
+    # 4. TTS 语音合成
+    try:
+        async for chunk in text_to_speech_stream(response):
+            await ws.send_json(chunk)
+    except TTSError:
+        await ws.send_json({"type": "error", "message": "抱歉，语音合成失败了"})
 
 
 async def _handle_visual(ws: WebSocket, data: ImageMessage, trace: str = "-"):
