@@ -119,13 +119,13 @@ function connect() {
   };
 }
 
-function sendAudio(pcm) {
+function sendAudio(pcm, seq) {
   if (!ws || ws.readyState !== WebSocket.OPEN) {
     console.warn('[WS] not connected, dropping audio');
     return false;
   }
   const b64 = pcmToBase64(pcm);
-  ws.send(JSON.stringify({ type: 'audio', audio: b64 }));
+  ws.send(JSON.stringify({ type: 'audio', audio: b64, seq: seq || 0 }));
   return true;
 }
 

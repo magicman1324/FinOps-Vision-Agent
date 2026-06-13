@@ -237,9 +237,9 @@ audio { display: none; }
   <audio id="audio-player"></audio>
 </div>
 
-<script src="vad.js?v=13"></script>
+<script src="vad.js?v=14"></script>
 <script src="camera.js?v=2"></script>
-<script src="websocket.js?v=7"></script>
+<script src="websocket.js?v=8"></script>
 <script>
 const camera = document.getElementById('camera');
 const statusDot = document.getElementById('status-dot');
@@ -299,6 +299,7 @@ function addBubble(text, cls) {
 }
 
 let ttsBuffer = [];
+let _msgSeq = 0;
 
 onAsrResult(function(text) {
   addBubble(text, 'user');
@@ -404,11 +405,14 @@ async function initCamera() {
     onSpeechEnd(function(audio) {
       // stopRecording() 触发此回调
       const dur = (audio.length / VAD_SAMPLE_RATE).toFixed(1);
-      addBubble('语音 ' + dur + 's', 'user');
+      const seq = ++_msgSeq;
+      console.log('[PTT] send seq=%d dur=%ss', seq, dur);
       if (!sendAudio(audio)) {
         addBubble('WebSocket 未连接, 语音未发送', 'error');
         setStatus('idle', '就绪');
+        return;
       }
+      setStatus('processing', '识别中...');
       const frame = captureFrame(camera);
       if (frame) {
         sendImage(frame);
