@@ -237,7 +237,7 @@ audio { display: none; }
   <audio id="audio-player"></audio>
 </div>
 
-<script src="vad.js?v=14"></script>
+<script src="vad.js?v=15"></script>
 <script src="camera.js?v=2"></script>
 <script src="websocket.js?v=9"></script>
 <script>
@@ -282,6 +282,15 @@ onRecordState(function(active) {
     pttBtn.innerHTML = '<span id="ptt-dot"></span>按住说话';
     setStatus('processing', '处理中...');
   }
+});
+
+// 音频被丢弃时的反馈
+onDrop(function(reason) {
+  const msg = reason === 'too_short' ? '语音太短，请按住说话完整短语' : '语音识别失败，请重说';
+  console.warn('[PTT] dropped:', reason);
+  addBubble(msg, 'error');
+  setStatus('error', '未发送');
+  setTimeout(() => setStatus('idle', '就绪'), 2000);
 });
 
 function addBubble(text, cls) {

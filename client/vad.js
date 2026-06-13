@@ -9,7 +9,7 @@
 const VAD_SAMPLE_RATE = 16000;
 const BUFFER_SIZE = 4096;
 const RING_BUFFER_SEC = 10;         // 环形缓冲区 10 秒（最长录音）
-const MIN_SPEECH_SEC = 0.4;         // 最短有效语音时长（短于此视为噪声）
+const MIN_SPEECH_SEC = 0.25;        // 最短有效语音时长（绕口令辅音多，降低阈值）
 
 let audioCtx = null;
 let streamNode = null;
@@ -25,6 +25,7 @@ let _recordFrames = 0;
 let onSpeechEndCb = null;
 let onVolumeCb = null;
 let onRecordStateCb = null;   // 录音状态回调 (true/false)
+let onDropCb = null;          // 音频被丢弃回调 (reason)
 let _volUpdateFrame = 0;
 
 /** 注册语音结束回调 @param {function(Float32Array)} cb */
@@ -35,6 +36,9 @@ function onVolume(cb) { onVolumeCb = cb; }
 
 /** 注册录音状态回调 @param {function(boolean)} cb */
 function onRecordState(cb) { onRecordStateCb = cb; }
+
+/** 注册丢弃回调 @param {function(string)} cb — reason: too_short / trimmed_empty */
+function onDrop(cb) { onDropCb = cb; }
 
 /** 计算 RMS */
 function rms(buffer) {
@@ -71,13 +75,13 @@ function ringReadFrom(startPos, durationSec) {
   return result;
 }
 
-/** 噪音裁剪：相对阈值 + padding */
+/** 噪音裁剪：相对阈值 + padding（绕口令辅音多，降低阈值避免误删） */
 function trimSilence(audio) {
   const noiseWindow = Math.min(Math.round(VAD_SAMPLE_RATE * 0.3), audio.length);
   let noiseSum = 0;
   for (let i = 0; i < noiseWindow; i++) noiseSum += Math.abs(audio[i]);
   const noiseFloor = noiseSum / noiseWindow;
-  const trimThresh = Math.max(noiseFloor * 3, 0.0001);
+  const trimThresh = Math.max(noiseFloor * 2, 0.00005);
   let trimStart = 0;
   let trimEnd = audio.length;
   while (trimStart < audio.length && Math.abs(audio[trimStart]) < trimThresh) trimStart++;
@@ -112,6 +116,7 @@ function stopRecording() {
 
   if (durSec < MIN_SPEECH_SEC) {
     console.log('[PTT] too_short (%.2fs < %.2fs), ignoring', durSec, MIN_SPEECH_SEC);
+    if (onDropCb) onDropCb('too_short');
     return;
   }
 
@@ -121,6 +126,9 @@ function stopRecording() {
     console.log('[PTT] raw=%d trimmed=%d samples', Math.round(durSec * VAD_SAMPLE_RATE), audio.length);
     if (audio.length >= VAD_SAMPLE_RATE * MIN_SPEECH_SEC) {
       onSpeechEndCb(audio);
+    } else {
+      console.log('[PTT] trimmed_too_short, dropping');
+      if (onDropCb) onDropCb('trimmed');
     }
   }
 }
