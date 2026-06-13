@@ -390,19 +390,37 @@ class TestCrossCutting:
                   ]),
         ):
             with client.websocket_connect("/ws") as ws:
-                # 发送图片
+                ws.send_json({"type": "image", "image": fake_jpeg})
+                ws.receive_json()
+
+                ws.send_json({"type": "audio", "audio": pcm})
+                assert ws.receive_json()["type"] == "asr_result"
+                ws.receive_json()
+
+                ws.send_json({"type": "audio", "audio": pcm})
+                assert ws.receive_json()["type"] == "asr_result"
+                ws.receive_json()
+
+    def test_l1_router_fallback_to_visual(self, client):
+        """L0 未命中 → L1 LLM 识别为 visual → VLM 路径"""
+        pcm = base64.b64encode(b"\x00" * 32000).decode()
+        fake_jpeg = base64.b64encode(b"\xff\xd8\xff\xe0" + b"\x00" * 100).decode()
+        from unittest.mock import patch
+
+        with (
+            patch("server.main.speech_to_text", return_value="这东西挺贵的"),
+            patch("server.main.classify_intent_l1", return_value="visual"),
+            patch("server.main.image_to_text", return_value="画面中有奢侈品"),
+            patch("server.main.text_to_speech_stream",
+                  return_value=_async_gen({"audio": "", "is_final": True})),
+        ):
+            with client.websocket_connect("/ws") as ws:
                 ws.send_json({"type": "image", "image": fake_jpeg})
                 ws.receive_json()  # vlm_result
 
-                # 视觉问题
                 ws.send_json({"type": "audio", "audio": pcm})
                 assert ws.receive_json()["type"] == "asr_result"
-                ws.receive_json()  # TTS final
-
-                # 纯文本跟进
-                ws.send_json({"type": "audio", "audio": pcm})
-                assert ws.receive_json()["type"] == "asr_result"
-                ws.receive_json()  # TTS final
+                ws.receive_json()  # TTS — VLM 返回的内容
 
 
 def _async_gen(*items):

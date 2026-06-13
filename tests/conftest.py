@@ -15,6 +15,9 @@ def client():
 
 @pytest.fixture(autouse=True)
 def _mock_llm():
-    """全局 mock ask_llm，避免测试中意外调用真实 API"""
-    with patch("server.main.ask_llm", new=AsyncMock(return_value="mock response")):
+    """全局 mock ask_llm + classify_intent_l1，避免测试中意外调用真实 API"""
+    with (
+        patch("server.main.ask_llm", new=AsyncMock(return_value="mock response")),
+        patch("server.main.classify_intent_l1", new=AsyncMock(return_value="textual")),
+    ):
         yield
