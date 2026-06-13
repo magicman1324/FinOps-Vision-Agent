@@ -1,5 +1,6 @@
 """FastAPI WebSocket 入口 — AI 视觉对话助手"""
 
+import asyncio
 import json
 import logging
 
@@ -109,8 +110,12 @@ async def _handle_audio(ws: WebSocket, data: dict):
     else:
         response = await _cascade_text(text, memory)
 
-    # 3. 记入记忆
+    # 3. 记入记忆 + 异步压缩
     memory.add_turn(text, response)
+    if memory.mid_count > 0 and not memory.mid_compressed:
+        asyncio.create_task(memory.compress_mid())
+    if memory.mid_compressed and memory.mid_count >= 2:
+        asyncio.create_task(memory.compress_background())
 
     # 4. TTS 语音合成
     try:
