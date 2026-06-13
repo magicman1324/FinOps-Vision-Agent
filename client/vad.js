@@ -150,7 +150,7 @@ function startVAD(stream) {
       let sum = 0;
       for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
       const rms = Math.sqrt(sum / input.length);
-      console.log('[VAD] first frame: rms=%.5f samples=%d', rms, input.length);
+      console.log('[VAD] first frame: rms=' + rms.toFixed(5) + ' samples=' + input.length);
     }
     processFrame(new Float32Array(input));
   };
