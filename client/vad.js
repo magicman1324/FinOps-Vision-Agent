@@ -30,6 +30,8 @@ const silenceFramesMax = (VAD_SAMPLE_RATE / BUFFER_SIZE) * SILENCE_TIMEOUT_SEC;
 
 let speechStartPos = 0;  // ring buffer 中 speech 开始位置
 let onSpeechEndCb = null;
+let onVolumeCb = null;
+let _volUpdateFrame = 0;
 
 /**
  * 注册 speech end 回调
@@ -37,6 +39,14 @@ let onSpeechEndCb = null;
  */
 function onSpeechEnd(cb) {
   onSpeechEndCb = cb;
+}
+
+/**
+ * 注册音量回调（每 5 帧触发一次）
+ * @param {function(number)} cb - 接收 RMS 值 [0, 1]
+ */
+function onVolume(cb) {
+  onVolumeCb = cb;
 }
 
 /**
@@ -94,6 +104,13 @@ let _speechRmsPeak = 0;
 function processFrame(samples) {
   const energy = rms(samples);
   ringWrite(samples);
+
+  if (onVolumeCb) {
+    _volUpdateFrame++;
+    if (_volUpdateFrame % 5 === 0) {
+      onVolumeCb(energy);
+    }
+  }
 
   if (!isSpeaking) {
     if (energy > RMS_THRESHOLD) {

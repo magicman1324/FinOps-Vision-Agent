@@ -66,6 +66,29 @@ body {
 #status-dot.processing { background: var(--warn); animation: pulse 0.6s infinite; }
 #status-dot.error { background: var(--error); }
 #status-dot.idle { background: var(--success); }
+
+/* 音量指示器 */
+#vol-meter {
+  width: 60px; height: 10px;
+  background: #333;
+  border-radius: 5px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+#vol-fill {
+  height: 100%; width: 0%;
+  background: var(--error);
+  border-radius: 5px;
+  transition: width 0.15s, background 0.3s;
+}
+#vol-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  min-width: 32px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
 @keyframes pulse {
   0%, 100% { opacity: 1; } 50% { opacity: 0.3; }
 }
@@ -174,6 +197,8 @@ audio { display: none; }
     <div id="status-bar">
       <div id="status-dot" class="idle"></div>
       <span id="status-text">初始化中...</span>
+      <div id="vol-meter"><div id="vol-fill"></div></div>
+      <span id="vol-label"></span>
     </div>
   </div>
   <div id="chat-panel">
@@ -182,7 +207,7 @@ audio { display: none; }
   <audio id="audio-player"></audio>
 </div>
 
-<script src="vad.js?v=5"></script>
+<script src="vad.js?v=6"></script>
 <script src="camera.js?v=2"></script>
 <script src="websocket.js?v=5"></script>
 <script>
@@ -192,10 +217,27 @@ const statusText = document.getElementById('status-text');
 const audioPlayer = document.getElementById('audio-player');
 const chatEl = document.getElementById('chat');
 
+const volFill = document.getElementById('vol-fill');
+const volLabel = document.getElementById('vol-label');
+
 function setStatus(state, text) {
   statusDot.className = state;
   statusText.textContent = text;
 }
+
+onVolume(function(rms) {
+  // RMS 0.001 → 1%, RMS 0.01 → 10%, RMS 0.1 → 50%, RMS 0.3 → 80%
+  const pct = Math.min(100, Math.round(Math.pow(rms * 3, 0.6) * 100));
+  volFill.style.width = pct + '%';
+  if (rms < 0.005) {
+    volFill.style.background = 'var(--error)';       // 红: 太安静
+  } else if (rms < 0.02) {
+    volFill.style.background = 'var(--warn)';         // 橙: 偏弱
+  } else {
+    volFill.style.background = 'var(--success)';      // 绿: 正常
+  }
+  volLabel.textContent = (rms * 100).toFixed(1);
+});
 
 function addBubble(text, cls) {
   const div = document.createElement('div');
