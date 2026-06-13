@@ -87,6 +87,10 @@ function ringRead(seconds) {
 /**
  * 处理音频帧
  */
+let _speechFrameCount = 0;
+let _speechRmsSum = 0;
+let _speechRmsPeak = 0;
+
 function processFrame(samples) {
   const energy = rms(samples);
   ringWrite(samples);
@@ -99,12 +103,18 @@ function processFrame(samples) {
         isSpeaking = true;
         silenceFrames = 0;
         speechStartPos = ringWritePos;
-        console.log('[VAD] speech_start');
+        _speechFrameCount = 0;
+        _speechRmsSum = 0;
+        _speechRmsPeak = 0;
+        console.log('[VAD] speech_start rms=' + energy.toFixed(4));
       }
     } else {
       speechFrames = 0;
     }
   } else {
+    _speechFrameCount++;
+    _speechRmsSum += energy;
+    if (energy > _speechRmsPeak) _speechRmsPeak = energy;
     if (energy < RMS_THRESHOLD) {
       silenceFrames++;
       if (silenceFrames >= silenceFramesMax) {
@@ -112,7 +122,8 @@ function processFrame(samples) {
         isSpeaking = false;
         speechFrames = 0;
         silenceFrames = 0;
-        console.log('[VAD] speech_end');
+        const avgRms = _speechFrameCount > 0 ? _speechRmsSum / _speechFrameCount : 0;
+        console.log('[VAD] speech_end frames=' + _speechFrameCount + ' rms_avg=' + avgRms.toFixed(5) + ' rms_peak=' + _speechRmsPeak.toFixed(5));
 
         if (onSpeechEndCb) {
           // 回溯 LOOKBACK_SEC + 从 start 到现在的全部音频
