@@ -9,7 +9,7 @@
 const VAD_SAMPLE_RATE = 16000;
 const BUFFER_SIZE = 4096;
 const RING_BUFFER_SEC = 10;         // 环形缓冲区 10 秒（最长录音）
-const MIN_SPEECH_SEC = 0.25;        // 最短有效语音时长（绕口令辅音多，降低阈值）
+const MIN_SPEECH_SEC = 0.4;         // 最短有效语音时长（短于此视为噪声）
 
 let audioCtx = null;
 let streamNode = null;
