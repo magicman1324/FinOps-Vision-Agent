@@ -88,6 +88,7 @@ def test_vlm_live():
     """VLM 真实调用：生成测试图片→视觉推理→验证返回文本"""
     if not _has_module("server.vlm"):
         pytest.skip("server.vlm module not available")
+    import asyncio
 
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
         img_path = tmp.name
@@ -110,7 +111,7 @@ def test_vlm_live():
 
         from server.vlm import image_to_text
 
-        result = image_to_text(img_b64, "请描述这张图片的颜色")
+        result = asyncio.run(image_to_text(img_b64, "请描述这张图片的颜色"))
         assert isinstance(result, str), "VLM 未返回文本"
         assert len(result.strip()) > 0, "VLM 返回空文本"
     finally:
