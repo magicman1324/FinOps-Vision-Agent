@@ -98,7 +98,7 @@ async def _handle_audio(ws: WebSocket, data: AudioMessage, trace: str = "-", seq
 
     # 1. 语音识别
     try:
-        text = speech_to_text(audio_b64)
+        text = await asyncio.to_thread(speech_to_text, audio_b64)
     except ASRError:
         await ws.send_json({"type": "error", "message": "抱歉，我没听清，请再说一次"})
         return
@@ -130,9 +130,11 @@ async def _handle_audio(ws: WebSocket, data: AudioMessage, trace: str = "-", seq
     # 3. 记入记忆 + 异步压缩
     memory.add_turn(text, response)
     if memory.mid_count > 0 and not memory.mid_compressed:
-        asyncio.create_task(memory.compress_mid())
+        task = asyncio.create_task(memory.compress_mid())
+        task.add_done_callback(lambda t: t.exception() and logger.error("compress_mid failed: %s", t.exception()))
     if memory.mid_compressed and memory.mid_count >= 2:
-        asyncio.create_task(memory.compress_background())
+        task = asyncio.create_task(memory.compress_background())
+        task.add_done_callback(lambda t: t.exception() and logger.error("compress_background failed: %s", t.exception()))
 
     # 4. TTS 语音合成
     try:

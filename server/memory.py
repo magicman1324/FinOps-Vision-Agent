@@ -1,5 +1,6 @@
 """三层渐进式语义压缩记忆 — 短窗口 + 中距摘要 + 背景元摘要"""
 
+import asyncio
 import logging
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,7 @@ class ConversationMemory:
         self._max_mid = max_mid_entries
         self._bg_max = bg_max_chars
         self._turn_count = 0
+        self._lock = asyncio.Lock()
 
     # ---- 写入 ----
 
@@ -64,17 +66,25 @@ class ConversationMemory:
             return
         from server.llm import ask_llm
 
-        new_mid = []
-        for entry in self._mid:
-            try:
-                compressed = await ask_llm(entry, system_prompt=MID_COMPRESS_PROMPT)
-                new_mid.append(compressed.strip())
-            except Exception:
-                logger.warning("compress_mid failed for entry, keeping raw")
-                new_mid.append(entry)
-        self._mid = new_mid
-        self._mid_compressed = True
-        logger.info("compress_mid done: %d entries", len(self._mid))
+        async with self._lock:
+            # 双重检查：锁内再次确认状态
+            if not self._mid or self._mid_compressed:
+                return
+            entries = list(self._mid)
+            new_mid = []
+            any_compressed = False
+            for entry in entries:
+                try:
+                    compressed = await ask_llm(entry, system_prompt=MID_COMPRESS_PROMPT)
+                    new_mid.append(compressed.strip())
+                    any_compressed = True
+                except Exception:
+                    logger.warning("compress_mid failed for entry, keeping raw")
+                    new_mid.append(entry)
+            self._mid = new_mid
+            if any_compressed:
+                self._mid_compressed = True
+            logger.info("compress_mid done: %d entries", len(self._mid))
 
     async def compress_background(self):
         """将中距摘要压缩为背景元摘要"""

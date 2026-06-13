@@ -47,20 +47,19 @@ class TestCascadeVisual:
                 with patch("server.main.text_to_speech_stream",
                            return_value=_async_gen({"type": "audio", "audio": "", "is_final": True})):
                     with client.websocket_connect("/ws") as ws:
-                        # 先发一张图片
                         ws.send_json({"type": "image", "image": _fake_jpeg_b64()})
                         ws.receive_json()  # vlm_result
 
-                        # 发语音问视觉问题
                         ws.send_json({"type": "audio", "audio": pcm})
 
                         r1 = ws.receive_json()
                         assert r1["type"] == "asr_result"
                         assert r1["text"] == "这是什么颜色"
 
-                        ws.receive_json()  # text_result
+                        r_text = ws.receive_json()
+                        assert r_text["type"] == "text_result"
+                        assert "苹果" in r_text["text"]  # VLM 返回的内容
 
-                        # TTS final — VLM 返回的内容 ("苹果" or our mock)
                         r2 = ws.receive_json()
                         assert r2["is_final"] is True
 
@@ -74,16 +73,17 @@ class TestCascadeVisual:
                            return_value=_async_gen({"type": "audio", "audio": "", "is_final": True})):
                     with client.websocket_connect("/ws") as ws:
                         ws.send_json({"type": "image", "image": _fake_jpeg_b64()})
-                        ws.receive_json()  # vlm_result, may error if vlm fails on send too? No, vlm call here succeeds
+                        ws.receive_json()  # vlm_result
 
                         ws.send_json({"type": "audio", "audio": pcm})
 
                         r1 = ws.receive_json()
                         assert r1["type"] == "asr_result"
 
-                        ws.receive_json()  # text_result
+                        r_text = ws.receive_json()
+                        assert r_text["type"] == "text_result"
+                        assert "mock response" in r_text["text"]  # L2 LLM 兜底
 
-                        # TTS final — should have LLM mocked "mock response"
                         r2 = ws.receive_json()
                         assert r2["is_final"] is True
 
@@ -105,7 +105,9 @@ class TestCascadeVisual:
                             r1 = ws.receive_json()
                             assert r1["type"] == "asr_result"
 
-                            ws.receive_json()  # text_result
+                            r_text = ws.receive_json()
+                            assert r_text["type"] == "text_result"
+                            assert r_text["text"] == FALLBACK_PRESET  # L3 预设
 
                             r2 = ws.receive_json()
                             assert r2["is_final"] is True
@@ -126,8 +128,11 @@ class TestCascadeText:
 
                     r1 = ws.receive_json()
                     assert r1["type"] == "asr_result"
-                    ws.receive_json()  # text_result
-                    # TTS final
+
+                    r_text = ws.receive_json()
+                    assert r_text["type"] == "text_result"
+                    assert "mock response" in r_text["text"]
+
                     r2 = ws.receive_json()
                     assert r2["is_final"] is True
 
@@ -145,7 +150,9 @@ class TestCascadeText:
                         r1 = ws.receive_json()
                         assert r1["type"] == "asr_result"
 
-                        ws.receive_json()  # text_result
+                        r_text = ws.receive_json()
+                        assert r_text["type"] == "text_result"
+                        assert r_text["text"] == FALLBACK_PRESET
 
                         r2 = ws.receive_json()
                         assert r2["is_final"] is True
@@ -167,7 +174,9 @@ class TestNoImageVisualIntent:
                     r1 = ws.receive_json()
                     assert r1["type"] == "asr_result"
 
-                    ws.receive_json()  # text_result
+                    r_text = ws.receive_json()
+                    assert r_text["type"] == "text_result"
+                    assert "还没看到画面" in r_text["text"]
 
                     r2 = ws.receive_json()
                     assert r2["is_final"] is True

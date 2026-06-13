@@ -311,6 +311,7 @@ let ttsBuffer = [];
 let _msgSeq = 0;
 let _playQueue = [];
 let _isPlaying = false;
+let _currentBlobUrl = null;
 
 function _playNext() {
   if (_playQueue.length === 0) {
@@ -320,10 +321,14 @@ function _playNext() {
   }
   _isPlaying = true;
   const blob = _playQueue.shift();
-  audioPlayer.src = URL.createObjectURL(blob);
-  audioPlayer.play().catch(console.warn);
+  if (_currentBlobUrl) URL.revokeObjectURL(_currentBlobUrl);
+  _currentBlobUrl = URL.createObjectURL(blob);
+  audioPlayer.src = _currentBlobUrl;
   audioPlayer.onplay = () => setStatus('', '播放中...');
   audioPlayer.onended = () => _playNext();
+  audioPlayer.play().catch(function() {
+    if (_isPlaying) _playNext();
+  });
 }
 
 onAsrResult(function(text) {
@@ -404,6 +409,10 @@ pttBtn.addEventListener('touchend', function(e) {
   e.preventDefault();
   sendRecording();
 });
+pttBtn.addEventListener('touchcancel', function(e) {
+  e.preventDefault();
+  sendRecording();
+});
 
 function sendRecording() {
   stopRecording();
@@ -435,8 +444,8 @@ async function initCamera() {
       }
       setStatus('processing', '识别中...');
       const frame = captureFrame(camera);
-      if (frame) {
-        sendImage(frame);
+      if (frame && !sendImage(frame)) {
+        console.warn('[PTT] image dropped (WS not connected)');
       }
     });
     setStatus('idle', '就绪');

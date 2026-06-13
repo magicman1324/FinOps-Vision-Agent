@@ -7,7 +7,7 @@ import time
 import dashscope
 from dashscope import MultiModalConversation
 
-from server.config import DASHSCOPE_API_KEY, DASHSCOPE_VLM_MODEL
+from server.config import DASHSCOPE_API_KEY, DASHSCOPE_VLM_MODEL, VLM_TIMEOUT
 
 logger = logging.getLogger(__name__)
 dashscope.api_key = DASHSCOPE_API_KEY
@@ -45,7 +45,7 @@ async def image_to_text(image_base64: str, prompt: str = "请描述你看到的�
         )
 
     start = time.monotonic()
-    response = await asyncio.to_thread(_call)
+    response = await asyncio.wait_for(asyncio.to_thread(_call), timeout=VLM_TIMEOUT)
     elapsed = time.monotonic() - start
 
     if response.status_code != 200:

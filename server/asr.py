@@ -17,13 +17,7 @@ from server.config import DASHSCOPE_API_KEY, DASHSCOPE_ASR_MODEL, ASR_TIMEOUT
 logger = logging.getLogger(__name__)
 dashscope.api_key = DASHSCOPE_API_KEY
 
-# 清除系统代理 — dashscope 内部用 aiohttp，会读 HTTP_PROXY
-for _key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
-    os.environ.pop(_key, None)
-
-# Windows: ProactorEventLoop SSL 有 bug，切 Selector
-if sys.platform == "win32":
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+# config.py 已处理代理清除和事件循环策略，此处不重复
 
 _debug_audio_dir = os.path.join(tempfile.gettempdir(), "xengineer3_debug")
 os.makedirs(_debug_audio_dir, exist_ok=True)

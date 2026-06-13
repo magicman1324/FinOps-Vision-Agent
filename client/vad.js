@@ -148,6 +148,7 @@ function processFrame(samples) {
 
 /** 启动音频采集 @param {MediaStream} stream */
 function startVAD(stream) {
+  stopVAD();  // 先清理旧实例，避免 AudioContext 泄漏（浏览器硬限制 6 个）
   audioCtx = new (window.AudioContext || window.webkitAudioContext)({
     sampleRate: VAD_SAMPLE_RATE,
   });
