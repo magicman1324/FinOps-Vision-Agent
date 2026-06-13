@@ -27,17 +27,22 @@ function onStatus(cb) { onStatusCb = cb; }
  * Float32Array PCM [-1,1] → Base64 (Int16 LE)
  */
 function pcmToBase64(pcm) {
+  const GAIN = 4.0;  // 麦克风音量太低，放大 4 倍
   const int16 = new Int16Array(pcm.length);
+  let peak = 0;
   for (let i = 0; i < pcm.length; i++) {
-    const s = Math.max(-1, Math.min(1, pcm[i]));
+    const s = Math.max(-1, Math.min(1, pcm[i] * GAIN));
     int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+    if (Math.abs(s) > peak) peak = Math.abs(s);
   }
   const bytes = new Uint8Array(int16.buffer);
   let binary = '';
   for (let i = 0; i < bytes.byteLength; i++) {
     binary += String.fromCharCode(bytes[i]);
   }
-  return btoa(binary);
+  const b64 = btoa(binary);
+  console.log('[PCM] samples=' + pcm.length + ' peak=' + peak.toFixed(3) + ' gain=' + GAIN);
+  return b64;
 }
 
 function connect() {
