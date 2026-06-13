@@ -80,7 +80,7 @@ DASHSCOPE_API_KEY=sk-xxx DEEPSEEK_API_KEY=sk-xxx pytest tests/test_live.py -v
 
 - **前端：** 纯 HTML5 + JavaScript，getUserMedia 捕获音视频，RMS 能量 VAD + 环形缓冲区
 - **后端：** Python + FastAPI + WebSocket，全双工通信
-- **AI 引擎：** DashScope ASR（通义听悟 fun-asr-realtime）→ DeepSeek LLM（deepseek-chat）→ Qwen-VL-Max 视觉 → CosyVoice v1 TTS 流式合成（longxiaochun 音色，MP3 16kHz mono 128kbps）
+- **AI 引擎：** DashScope ASR（通义听悟 fun-asr-realtime）→ DeepSeek LLM（deepseek-v4-flash）→ Qwen-VL-Max 视觉 → CosyVoice v1 TTS 流式合成（longxiaochun 音色，MP3 16kHz mono 128kbps）
 - **测试：** pytest + pytest-asyncio，asyncio_mode=auto（~121 条用例）
 - **CI：** GitHub Actions ubuntu-latest，unit job（每次 push/PR 跑 mock 测试）+ live job（仅 PR，需 DASHSCOPE_API_KEY + DEEPSEEK_API_KEY secret）
 
@@ -96,7 +96,7 @@ DASHSCOPE_API_KEY=sk-xxx DEEPSEEK_API_KEY=sk-xxx pytest tests/test_live.py -v
 ├── asr.py        — DashScope fun-asr-realtime，非流式 call() 解析返回值
 ├── router.py     — L0 关键词正则 (22+ patterns) + L1 LLM 二分类兜底
 ├── vlm.py        — Qwen-VL-Max 视觉推理 (asyncio.to_thread 包装同步调用)
-├── llm.py        — DeepSeek deepseek-chat 流式文本生成 (httpx SSE, trust_env=False)
+├── llm.py        — DeepSeek deepseek-v4-flash 流式文本生成 (httpx SSE, trust_env=False)
 ├── tts.py        — CosyVoice v1 流式 TTS (asyncio.Queue 桥接同步回调)
 ├── memory.py     — 三层语义压缩 (short 3轮 → mid 摘要 → bg ≤150字)
 └── config.py     — 环境变量 + 代理剥离 + Windows SelectorEventLoop
@@ -164,7 +164,7 @@ DASHSCOPE_VLM_MODEL=qwen-vl-max
 # DeepSeek — LLM 文本生成 + 意图分类
 DEEPSEEK_API_KEY=sk-xxx
 DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
-DEEPSEEK_MODEL=deepseek-chat
+DEEPSEEK_MODEL=deepseek-v4-flash
 
 # 超时（秒）
 ASR_TIMEOUT=10
