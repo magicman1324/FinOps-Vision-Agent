@@ -166,6 +166,35 @@ body {
 
 audio { display: none; }
 
+/* 录音按钮 */
+#ptt-btn {
+  width: 100%; height: 52px;
+  border: 2px solid var(--accent);
+  border-radius: 26px;
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-size: 16px; font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+}
+#ptt-btn:hover { background: rgba(79, 195, 247, 0.22); }
+#ptt-btn:active { background: rgba(79, 195, 247, 0.30); }
+#ptt-btn.recording {
+  background: var(--error-bg);
+  border-color: var(--error);
+  color: var(--error);
+  animation: pulse 0.8s infinite;
+}
+#ptt-dot {
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
 /* 移动端: 堆叠布局 */
 @media (max-width: 840px) {
   #app {
@@ -194,6 +223,7 @@ audio { display: none; }
     <div id="video-container">
       <video id="camera" autoplay playsinline muted></video>
     </div>
+    <button id="ptt-btn"><span id="ptt-dot"></span>按住说话</button>
     <div id="status-bar">
       <div id="status-dot" class="idle"></div>
       <span id="status-text">初始化中...</span>
@@ -207,7 +237,7 @@ audio { display: none; }
   <audio id="audio-player"></audio>
 </div>
 
-<script src="vad.js?v=12"></script>
+<script src="vad.js?v=13"></script>
 <script src="camera.js?v=2"></script>
 <script src="websocket.js?v=6"></script>
 <script>
@@ -217,6 +247,8 @@ const statusText = document.getElementById('status-text');
 const audioPlayer = document.getElementById('audio-player');
 const chatEl = document.getElementById('chat');
 
+const pttBtn = document.getElementById('ptt-btn');
+const pttDot = document.getElementById('ptt-dot');
 const volFill = document.getElementById('vol-fill');
 const volLabel = document.getElementById('vol-label');
 
@@ -226,17 +258,30 @@ function setStatus(state, text) {
 }
 
 onVolume(function(rms) {
-  // RMS 0.001 → 1%, RMS 0.01 → 10%, RMS 0.1 → 50%, RMS 0.3 → 80%
   const pct = Math.min(100, Math.round(Math.pow(rms * 3, 0.6) * 100));
   volFill.style.width = pct + '%';
   if (rms < 0.005) {
-    volFill.style.background = 'var(--error)';       // 红: 太安静
+    volFill.style.background = 'var(--error)';
   } else if (rms < 0.02) {
-    volFill.style.background = 'var(--warn)';         // 橙: 偏弱
+    volFill.style.background = 'var(--warn)';
   } else {
-    volFill.style.background = 'var(--success)';      // 绿: 正常
+    volFill.style.background = 'var(--success)';
   }
   volLabel.textContent = (rms * 100).toFixed(1);
+});
+
+// 录音状态回显
+onRecordState(function(active) {
+  if (active) {
+    pttBtn.className = 'recording';
+    pttBtn.innerHTML = '<span id="ptt-dot"></span>松开发送';
+    // 重新获取 ptt-dot 引用 (innerHTML 替换后失效)
+    setStatus('listening', '录音中...');
+  } else {
+    pttBtn.className = '';
+    pttBtn.innerHTML = '<span id="ptt-dot"></span>按住说话';
+    setStatus('processing', '处理中...');
+  }
 });
 
 function addBubble(text, cls) {
@@ -278,11 +323,10 @@ onTtsChunk(function(audioB64, isFinal) {
       const blob = new Blob([bytes], { type: 'audio/mp3' });
       audioPlayer.src = URL.createObjectURL(blob);
       audioPlayer.play().catch(console.warn);
-      // 播放时状态反馈
       audioPlayer.onplay = () => setStatus('', '播放中...');
-      audioPlayer.onended = () => setStatus('idle', '就绪 — 请说话');
+      audioPlayer.onended = () => setStatus('idle', '就绪');
     } else {
-      setStatus('idle', '就绪 — 请说话');
+      setStatus('idle', '就绪');
     }
   }
 });
@@ -290,12 +334,12 @@ onTtsChunk(function(audioB64, isFinal) {
 onError(function(msg) {
   addBubble(msg, 'error');
   setStatus('error', '服务端错误');
-  setTimeout(() => setStatus('idle', '就绪 — 请说话'), 2500);
+  setTimeout(() => setStatus('idle', '就绪'), 2500);
 });
 
 onStatus(function(state) {
   if (state === 'connected') {
-    if (statusText.textContent === '初始化中...') setStatus('idle', '就绪 — 请说话');
+    if (statusText.textContent === '初始化中...') setStatus('idle', '就绪');
   }
   if (state === 'reconnecting') {
     setStatus('error', '连接断开, 重连中...');
@@ -310,6 +354,35 @@ onStatus(function(state) {
 
 connect();
 
+// ---- 按键通话 ----
+pttBtn.addEventListener('mousedown', function(e) {
+  e.preventDefault();
+  startRecording();
+});
+pttBtn.addEventListener('mouseup', function(e) {
+  e.preventDefault();
+  sendRecording();
+});
+pttBtn.addEventListener('mouseleave', function(e) {
+  if (pttBtn.classList.contains('recording')) {
+    sendRecording();
+  }
+});
+// 触摸事件
+pttBtn.addEventListener('touchstart', function(e) {
+  e.preventDefault();
+  startRecording();
+});
+pttBtn.addEventListener('touchend', function(e) {
+  e.preventDefault();
+  sendRecording();
+});
+
+function sendRecording() {
+  stopRecording();
+  // onSpeechEnd 回调会在 stopRecording 内触发，需要等待
+}
+
 async function initCamera() {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
@@ -321,22 +394,22 @@ async function initCamera() {
       }
     });
     camera.srcObject = stream;
-    addBubble('摄像头/麦克风就绪', 'system');
-    startVAD(stream);
+    addBubble('摄像头/麦克风就绪 — 按住按钮说话，松开发送', 'system');
+    startVAD(stream);  // 仅启动音频采集，不做 VAD 检测
     onSpeechEnd(function(audio) {
-      setStatus('processing', '处理中...');
+      // stopRecording() 触发此回调
       const dur = (audio.length / VAD_SAMPLE_RATE).toFixed(1);
       addBubble('语音 ' + dur + 's', 'user');
       if (!sendAudio(audio)) {
         addBubble('WebSocket 未连接, 语音未发送', 'error');
-        setStatus('idle', '就绪 — 请说话');
+        setStatus('idle', '就绪');
       }
       const frame = captureFrame(camera);
       if (frame) {
         sendImage(frame);
       }
     });
-    setStatus('idle', '就绪 — 请说话');
+    setStatus('idle', '就绪');
     return stream;
   } catch (err) {
     addBubble('权限获取失败: ' + err.message, 'error');
