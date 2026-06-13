@@ -10,11 +10,12 @@
 const VAD_SAMPLE_RATE = 16000;
 const BUFFER_SIZE = 4096;
 const RING_BUFFER_SEC = 3;          // 环形缓冲区 3 秒
-const LOOKBACK_SEC = 0.3;           // 回溯 300ms
-const SILENCE_TIMEOUT_SEC = 2.0;    // 静音 2.0s 判定结束
+const LOOKBACK_SEC = 0.1;           // 回溯 100ms
+const SILENCE_TIMEOUT_SEC = 1.0;    // 静音 1.0s 判定结束
 const RMS_THRESHOLD = 0.01;         // RMS 能量阈值
 const SPEECH_FRAMES_MIN = 3;        // 连续 N 帧高于阈值才判定 speech start
-const MIN_SPEECH_SEC = 0.8;         // 最短有效语音时长（短于此视为噪声）
+const MIN_SPEECH_SEC = 0.5;         // 最短有效语音时长（短于此视为噪声）
+const TRIM_THRESHOLD = 0.003;       // 裁剪静音阈值（低于此值视为静音）
 
 let audioCtx = null;
 let streamNode = null;
@@ -147,7 +148,22 @@ function processFrame(samples) {
           const durSinceStart = (ringWritePos - speechStartPos + ringBuffer.length) % ringBuffer.length / VAD_SAMPLE_RATE;
           const totalSec = Math.min(durSinceStart + LOOKBACK_SEC, RING_BUFFER_SEC);
           if (totalSec >= MIN_SPEECH_SEC) {
-            const audio = ringRead(totalSec);
+            let audio = ringRead(totalSec);
+            // 裁剪首尾静音，避免大量空白干扰 ASR
+            let trimStart = 0;
+            let trimEnd = audio.length;
+            while (trimStart < audio.length && Math.abs(audio[trimStart]) < TRIM_THRESHOLD) trimStart++;
+            while (trimEnd > trimStart && Math.abs(audio[trimEnd - 1]) < TRIM_THRESHOLD) trimEnd--;
+            // 保留少量 padding (50ms)
+            const pad = Math.round(VAD_SAMPLE_RATE * 0.05);
+            trimStart = Math.max(0, trimStart - pad);
+            trimEnd = Math.min(audio.length, trimEnd + pad);
+            if (trimEnd > trimStart) {
+              audio = audio.slice(trimStart, trimEnd);
+            }
+            console.log('[VAD] trimmed %d→%d samples (%.2fs→%.2fs)',
+              Math.round(totalSec * VAD_SAMPLE_RATE), audio.length,
+              totalSec, audio.length / VAD_SAMPLE_RATE);
             onSpeechEndCb(audio);
           } else {
             console.log('[VAD] speech_too_short (%.2fs < %.2fs), ignoring', totalSec, MIN_SPEECH_SEC);
