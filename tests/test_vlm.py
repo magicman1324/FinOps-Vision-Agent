@@ -1,5 +1,6 @@
 """测试 VLM 模块"""
 
+import asyncio
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -22,7 +23,7 @@ class TestImageToText:
 
         with patch("server.vlm.MultiModalConversation") as MockMM:
             MockMM.call.return_value = mock_response
-            result = image_to_text(fake_b64)
+            result = asyncio.run(image_to_text(fake_b64))
             assert "猫" in result
             MockMM.call.assert_called_once()
 
@@ -40,7 +41,7 @@ class TestImageToText:
 
         with patch("server.vlm.MultiModalConversation") as MockMM:
             MockMM.call.return_value = mock_response
-            result = image_to_text(fake_b64, prompt="什么颜色的车?")
+            result = asyncio.run(image_to_text(fake_b64, prompt="什么颜色的车?"))
             assert "红色" in result
             call_args = MockMM.call.call_args.kwargs
             messages = call_args["messages"]
@@ -54,7 +55,7 @@ class TestImageToText:
         with patch("server.vlm.MultiModalConversation") as MockMM:
             MockMM.call.return_value = mock_response
             with pytest.raises(VLMError, match="500"):
-                image_to_text("fake")
+                asyncio.run(image_to_text("fake"))
 
     def test_raises_on_empty_choices(self):
         mock_response = MagicMock()
@@ -64,4 +65,4 @@ class TestImageToText:
         with patch("server.vlm.MultiModalConversation") as MockMM:
             MockMM.call.return_value = mock_response
             with pytest.raises(VLMError, match="empty"):
-                image_to_text("fake")
+                asyncio.run(image_to_text("fake"))

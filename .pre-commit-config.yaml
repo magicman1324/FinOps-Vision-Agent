@@ -1,0 +1,16 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: detect-private-key
+      - id: check-added-large-files
+        args: ['--maxkb=500']
+
+  - repo: local
+    hooks:
+      - id: detect-dashscope-key
+        name: detect DashScope/DeepSeek API keys
+        entry: sk-[a-zA-Z0-9]{16,}
+        language: pygrep
+        types: [text]
+        exclude: '^CLAUDE\.md$|\.pre-commit-config\.yaml$|^总结.*\.md$|\.env\.example$'

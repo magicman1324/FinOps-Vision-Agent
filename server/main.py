@@ -150,7 +150,7 @@ async def _handle_visual(ws: WebSocket, data: ImageMessage, trace: str = "-"):
 
     prompt = data.get("prompt", "请描述你看到的画面")
     try:
-        text = image_to_text(image_b64, prompt)
+        text = await image_to_text(image_b64, prompt)
     except VLMError:
         await ws.send_json({"type": "error", "message": "抱歉，图片分析失败了"})
         return
@@ -173,7 +173,7 @@ async def _cascade_visual(image: str, question: str, memory: ConversationMemory)
     if ctx:
         prompt = f"对话历史:\n{ctx}\n\n{prompt}"
     try:
-        return image_to_text(image, prompt)
+        return await image_to_text(image, prompt)
     except VLMError:
         logger.warning("VLM failed, cascading to LLM")
 

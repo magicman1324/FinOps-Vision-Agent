@@ -1,12 +1,13 @@
 """Qwen-VL-Max 视觉推理 — 图片→文本"""
 
+import asyncio
 import logging
 import time
 
 import dashscope
 from dashscope import MultiModalConversation
 
-from server.config import DASHSCOPE_API_KEY, DASHSCOPE_VLM_MODEL, VLM_TIMEOUT
+from server.config import DASHSCOPE_API_KEY, DASHSCOPE_VLM_MODEL
 
 logger = logging.getLogger(__name__)
 dashscope.api_key = DASHSCOPE_API_KEY
@@ -16,7 +17,7 @@ class VLMError(Exception):
     """VLM 调用失败"""
 
 
-def image_to_text(image_base64: str, prompt: str = "请描述你看到的画面") -> str:
+async def image_to_text(image_base64: str, prompt: str = "请描述你看到的画面") -> str:
     """
     基于图片进行视觉推理，返回文本描述
 
@@ -36,11 +37,15 @@ def image_to_text(image_base64: str, prompt: str = "请描述你看到的画面"
             ],
         }
     ]
+
+    def _call():
+        return MultiModalConversation.call(
+            model=DASHSCOPE_VLM_MODEL,
+            messages=messages,
+        )
+
     start = time.monotonic()
-    response = MultiModalConversation.call(
-        model=DASHSCOPE_VLM_MODEL,
-        messages=messages,
-    )
+    response = await asyncio.to_thread(_call)
     elapsed = time.monotonic() - start
 
     if response.status_code != 200:
