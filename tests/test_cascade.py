@@ -45,7 +45,7 @@ class TestCascadeVisual:
         with patch("server.main.speech_to_text", return_value="这是什么颜色"):
             with patch("server.main.image_to_text", return_value="这是一个红色的苹果"):
                 with patch("server.main.text_to_speech_stream",
-                           return_value=_async_gen({"audio": "", "is_final": True})):
+                           return_value=_async_gen({"type": "audio", "audio": "", "is_final": True})):
                     with client.websocket_connect("/ws") as ws:
                         # 先发一张图片
                         ws.send_json({"type": "image", "image": _fake_jpeg_b64()})
@@ -58,6 +58,8 @@ class TestCascadeVisual:
                         assert r1["type"] == "asr_result"
                         assert r1["text"] == "这是什么颜色"
 
+                        ws.receive_json()  # text_result
+
                         # TTS final — VLM 返回的内容 ("苹果" or our mock)
                         r2 = ws.receive_json()
                         assert r2["is_final"] is True
@@ -69,7 +71,7 @@ class TestCascadeVisual:
         with patch("server.main.speech_to_text", return_value="这是什么"):
             with patch("server.main.image_to_text", side_effect=VLMError("vlm down")):
                 with patch("server.main.text_to_speech_stream",
-                           return_value=_async_gen({"audio": "", "is_final": True})):
+                           return_value=_async_gen({"type": "audio", "audio": "", "is_final": True})):
                     with client.websocket_connect("/ws") as ws:
                         ws.send_json({"type": "image", "image": _fake_jpeg_b64()})
                         ws.receive_json()  # vlm_result, may error if vlm fails on send too? No, vlm call here succeeds
@@ -78,6 +80,8 @@ class TestCascadeVisual:
 
                         r1 = ws.receive_json()
                         assert r1["type"] == "asr_result"
+
+                        ws.receive_json()  # text_result
 
                         # TTS final — should have LLM mocked "mock response"
                         r2 = ws.receive_json()
@@ -91,7 +95,7 @@ class TestCascadeVisual:
             with patch("server.main.image_to_text", side_effect=VLMError("vlm down")):
                 with patch("server.main.ask_llm", side_effect=LLMError("llm down")):
                     with patch("server.main.text_to_speech_stream",
-                               return_value=_async_gen({"audio": "", "is_final": True})):
+                               return_value=_async_gen({"type": "audio", "audio": "", "is_final": True})):
                         with client.websocket_connect("/ws") as ws:
                             ws.send_json({"type": "image", "image": _fake_jpeg_b64()})
                             ws.receive_json()
@@ -100,6 +104,8 @@ class TestCascadeVisual:
 
                             r1 = ws.receive_json()
                             assert r1["type"] == "asr_result"
+
+                            ws.receive_json()  # text_result
 
                             r2 = ws.receive_json()
                             assert r2["is_final"] is True
@@ -114,12 +120,13 @@ class TestCascadeText:
 
         with patch("server.main.speech_to_text", return_value="今天天气怎么样"):
             with patch("server.main.text_to_speech_stream",
-                       return_value=_async_gen({"audio": "", "is_final": True})):
+                       return_value=_async_gen({"type": "audio", "audio": "", "is_final": True})):
                 with client.websocket_connect("/ws") as ws:
                     ws.send_json({"type": "audio", "audio": pcm})
 
                     r1 = ws.receive_json()
                     assert r1["type"] == "asr_result"
+                    ws.receive_json()  # text_result
                     # TTS final
                     r2 = ws.receive_json()
                     assert r2["is_final"] is True
@@ -131,12 +138,14 @@ class TestCascadeText:
         with patch("server.main.speech_to_text", return_value="今天天气怎么样"):
             with patch("server.main.ask_llm", side_effect=LLMError("llm down")):
                 with patch("server.main.text_to_speech_stream",
-                           return_value=_async_gen({"audio": "", "is_final": True})):
+                           return_value=_async_gen({"type": "audio", "audio": "", "is_final": True})):
                     with client.websocket_connect("/ws") as ws:
                         ws.send_json({"type": "audio", "audio": pcm})
 
                         r1 = ws.receive_json()
                         assert r1["type"] == "asr_result"
+
+                        ws.receive_json()  # text_result
 
                         r2 = ws.receive_json()
                         assert r2["is_final"] is True
@@ -151,12 +160,14 @@ class TestNoImageVisualIntent:
 
         with patch("server.main.speech_to_text", return_value="这是什么颜色"):
             with patch("server.main.text_to_speech_stream",
-                       return_value=_async_gen({"audio": "", "is_final": True})):
+                       return_value=_async_gen({"type": "audio", "audio": "", "is_final": True})):
                 with client.websocket_connect("/ws") as ws:
                     ws.send_json({"type": "audio", "audio": pcm})
 
                     r1 = ws.receive_json()
                     assert r1["type"] == "asr_result"
+
+                    ws.receive_json()  # text_result
 
                     r2 = ws.receive_json()
                     assert r2["is_final"] is True

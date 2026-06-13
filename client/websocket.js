@@ -14,12 +14,14 @@ let retryCount = 0;
 let onAsrResultCb = null;
 let onTtsChunkCb = null;
 let onVlmResultCb = null;
+let onTextResultCb = null;
 let onErrorCb = null;
 let onStatusCb = null;
 
 function onAsrResult(cb) { onAsrResultCb = cb; }
 function onTtsChunk(cb) { onTtsChunkCb = cb; }
 function onVlmResult(cb) { onVlmResultCb = cb; }
+function onTextResult(cb) { onTextResultCb = cb; }
 function onError(cb) { onErrorCb = cb; }
 function onStatus(cb) { onStatusCb = cb; }
 
@@ -80,6 +82,9 @@ function connect() {
           break;
         case 'vlm_result':
           if (onVlmResultCb) onVlmResultCb(data.text);
+          break;
+        case 'text_result':
+          if (onTextResultCb) onTextResultCb(data.text);
           break;
         case 'error':
           console.warn('[WS] server error:', data.message);

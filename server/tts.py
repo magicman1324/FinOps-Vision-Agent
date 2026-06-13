@@ -76,11 +76,11 @@ async def text_to_speech_stream(text: str):
             if msg_type == "error":
                 raise TTSError(f"TTS synthesis failed: {payload}")
             if msg_type == "done":
-                yield {"audio": "", "is_final": True}
+                yield {"type": "audio", "audio": "", "is_final": True}
                 return
             if msg_type == "data":
                 audio_b64 = base64.b64encode(payload).decode()
-                yield {"audio": audio_b64, "is_final": False}
+                yield {"type": "audio", "audio": audio_b64, "is_final": False}
     except asyncio.TimeoutError:
         raise TTSError(f"TTS timeout after {TTS_TIMEOUT}s")
     except Exception:

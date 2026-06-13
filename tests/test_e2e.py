@@ -40,14 +40,15 @@ class TestE2EUserFlow:
                 patch(
                     "server.main.text_to_speech_stream",
                     return_value=_async_gen(
-                        {"audio": "bW9ja2F1ZGlv", "is_final": False},
-                        {"audio": "", "is_final": True},
+                        {"type": "audio", "audio": "bW9ja2F1ZGlv", "is_final": False},
+                        {"type": "audio", "audio": "", "is_final": True},
                     ),
                 ),
             ):
                 ws.send_json({"type": "audio", "audio": audio_b64})
                 r = ws.receive_json()
                 assert r["type"] == "asr_result"
+                ws.receive_json()  # text_result
                 r = ws.receive_json()
                 assert r["is_final"] is False
                 r = ws.receive_json()
@@ -77,12 +78,13 @@ class TestE2EUserFlow:
                 patch("server.main.speech_to_text", return_value="用户说了什么"),
                 patch(
                     "server.main.text_to_speech_stream",
-                    return_value=_async_gen({"audio": "", "is_final": True}),
+                    return_value=_async_gen({"type": "audio", "audio": "", "is_final": True}),
                 ),
             ):
                 ws.send_json({"type": "audio", "audio": pcm_b64})
                 r = ws.receive_json()
                 assert r["type"] == "asr_result"
+                ws.receive_json()  # text_result
                 r = ws.receive_json()
                 assert r["is_final"] is True
 
@@ -99,12 +101,13 @@ class TestE2EUserFlow:
                     patch("server.main.speech_to_text", return_value=f"第{i+1}轮"),
                     patch(
                         "server.main.text_to_speech_stream",
-                        return_value=_async_gen({"audio": "", "is_final": True}),
+                        return_value=_async_gen({"type": "audio", "audio": "", "is_final": True}),
                     ),
                 ):
                     ws.send_json({"type": "audio", "audio": pcm_b64})
                     r = ws.receive_json()
                     assert r["type"] == "asr_result"
+                    ws.receive_json()  # text_result
                     r = ws.receive_json()
                     assert r["is_final"] is True
 

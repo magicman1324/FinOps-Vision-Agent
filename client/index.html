@@ -239,7 +239,7 @@ audio { display: none; }
 
 <script src="vad.js?v=13"></script>
 <script src="camera.js?v=2"></script>
-<script src="websocket.js?v=6"></script>
+<script src="websocket.js?v=7"></script>
 <script>
 const camera = document.getElementById('camera');
 const statusDot = document.getElementById('status-dot');
@@ -303,6 +303,11 @@ let ttsBuffer = [];
 onAsrResult(function(text) {
   addBubble(text, 'user');
   setStatus('processing', '思考中...');
+});
+
+onTextResult(function(text) {
+  addBubble(text, 'assistant');
+  setStatus('idle', '');
 });
 
 onVlmResult(function(text) {

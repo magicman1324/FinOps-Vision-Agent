@@ -125,6 +125,9 @@ async def _handle_audio(ws: WebSocket, data: AudioMessage, trace: str = "-"):
     else:
         response = await _cascade_text(text, memory)
 
+    # 发送文字回复给前端
+    await ws.send_json({"type": "text_result", "text": response})
+
     # 3. 记入记忆 + 异步压缩
     memory.add_turn(text, response)
     if memory.mid_count > 0 and not memory.mid_compressed:
