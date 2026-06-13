@@ -239,7 +239,7 @@ audio { display: none; }
 
 <script src="vad.js?v=14"></script>
 <script src="camera.js?v=2"></script>
-<script src="websocket.js?v=8"></script>
+<script src="websocket.js?v=9"></script>
 <script>
 const camera = document.getElementById('camera');
 const statusDot = document.getElementById('status-dot');
@@ -300,6 +300,22 @@ function addBubble(text, cls) {
 
 let ttsBuffer = [];
 let _msgSeq = 0;
+let _playQueue = [];
+let _isPlaying = false;
+
+function _playNext() {
+  if (_playQueue.length === 0) {
+    _isPlaying = false;
+    setStatus('idle', '就绪');
+    return;
+  }
+  _isPlaying = true;
+  const blob = _playQueue.shift();
+  audioPlayer.src = URL.createObjectURL(blob);
+  audioPlayer.play().catch(console.warn);
+  audioPlayer.onplay = () => setStatus('', '播放中...');
+  audioPlayer.onended = () => _playNext();
+}
 
 onAsrResult(function(text) {
   addBubble(text, 'user');
@@ -327,12 +343,8 @@ onTtsChunk(function(audioB64, isFinal) {
         bytes[i] = binary.charCodeAt(i);
       }
       const blob = new Blob([bytes], { type: 'audio/mp3' });
-      audioPlayer.src = URL.createObjectURL(blob);
-      audioPlayer.play().catch(console.warn);
-      audioPlayer.onplay = () => setStatus('', '播放中...');
-      audioPlayer.onended = () => setStatus('idle', '就绪');
-    } else {
-      setStatus('idle', '就绪');
+      _playQueue.push(blob);
+      if (!_isPlaying) _playNext();
     }
   }
 });
