@@ -67,6 +67,3 @@ async def classify_intent_l1(text: str) -> str:
     return "textual"
 
 
-def classify_intent(text: str) -> str:
-    """L0 关键词路由（同步，向后兼容）"""
-    return classify_intent_l0(text)
