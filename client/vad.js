@@ -9,7 +9,7 @@
 
 const VAD_SAMPLE_RATE = 16000;
 const BUFFER_SIZE = 4096;
-const RING_BUFFER_SEC = 3;          // 环形缓冲区 3 秒
+const RING_BUFFER_SEC = 5;          // 环形缓冲区 5 秒
 const LOOKBACK_SEC = 1.2;           // 回溯 1.2s (VAD 延迟 0.77s + 余量)
 const SILENCE_TIMEOUT_SEC = 1.0;    // 静音 1.0s 判定结束
 const RMS_THRESHOLD = 0.01;         // RMS 能量阈值

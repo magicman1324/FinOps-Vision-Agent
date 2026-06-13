@@ -25,13 +25,24 @@ function onStatus(cb) { onStatusCb = cb; }
 
 /**
  * Float32Array PCM [-1,1] → Base64 (Int16 LE)
+ * 动态归一化: 峰值映射到 -6dBFS，轻声辅音也能被 ASR 识别
  */
 function pcmToBase64(pcm) {
-  const GAIN = 6.0;  // 关闭 AGC 后补偿麦克风电平
+  // 找 Float32 峰值
+  let floatPeak = 0;
+  for (let i = 0; i < pcm.length; i++) {
+    const a = Math.abs(pcm[i]);
+    if (a > floatPeak) floatPeak = a;
+  }
+  // 动态增益: 目标峰值 0.5 (-6dBFS)，最大增益 20x，最小峰值阈值避免噪声放大
+  const targetPeak = 0.5;
+  const clampPeak = Math.max(floatPeak, 0.001);
+  const gain = Math.min(targetPeak / clampPeak, 20.0);
+
   const int16 = new Int16Array(pcm.length);
   let peak = 0;
   for (let i = 0; i < pcm.length; i++) {
-    const s = Math.max(-1, Math.min(1, pcm[i] * GAIN));
+    const s = Math.max(-1, Math.min(1, pcm[i] * gain));
     int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
     if (Math.abs(s) > peak) peak = Math.abs(s);
   }
@@ -41,7 +52,7 @@ function pcmToBase64(pcm) {
     binary += String.fromCharCode(bytes[i]);
   }
   const b64 = btoa(binary);
-  console.log('[PCM] samples=' + pcm.length + ' peak=' + peak.toFixed(3) + ' gain=' + GAIN);
+  console.log('[PCM] samples=' + pcm.length + ' floatPeak=' + floatPeak.toFixed(4) + ' gain=' + gain.toFixed(1) + 'x int16Peak=' + peak.toFixed(3));
   return b64;
 }
 
