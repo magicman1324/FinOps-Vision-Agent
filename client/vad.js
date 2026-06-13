@@ -11,11 +11,10 @@ const VAD_SAMPLE_RATE = 16000;
 const BUFFER_SIZE = 4096;
 const RING_BUFFER_SEC = 5;          // 环形缓冲区 5 秒
 const LOOKBACK_SEC = 1.2;           // 回溯 1.2s (VAD 延迟 0.77s + 余量)
-const SILENCE_TIMEOUT_SEC = 1.0;    // 静音 1.0s 判定结束
-const RMS_THRESHOLD = 0.01;         // RMS 能量阈值
-const SPEECH_FRAMES_MIN = 2;        // 连续 N 帧高于阈值才判定 speech start
+const SILENCE_TIMEOUT_SEC = 0.6;    // 静音 0.6s 判定结束（提速）
+const RMS_THRESHOLD = 0.008;        // RMS 能量阈值（更灵敏）
+const SPEECH_FRAMES_MIN = 1;        // 单帧触发（最快检测）
 const MIN_SPEECH_SEC = 0.4;         // 最短有效语音时长（短于此视为噪声）
-const TRIM_THRESHOLD = 0.0005;      // 裁剪静音阈值
 
 let audioCtx = null;
 let streamNode = null;
@@ -149,21 +148,25 @@ function processFrame(samples) {
           const totalSec = Math.min(durSinceStart + LOOKBACK_SEC, RING_BUFFER_SEC);
           if (totalSec >= MIN_SPEECH_SEC) {
             let audio = ringRead(totalSec);
-            // 裁剪首尾静音，避免大量空白干扰 ASR
+            // 相对阈值裁剪：用前 0.3s 估计底噪，阈值 = 3×底噪 (min 0.0001)
+            const noiseWindow = Math.min(Math.round(VAD_SAMPLE_RATE * 0.3), audio.length);
+            let noiseSum = 0;
+            for (let i = 0; i < noiseWindow; i++) noiseSum += Math.abs(audio[i]);
+            const noiseFloor = noiseSum / noiseWindow;
+            const trimThresh = Math.max(noiseFloor * 3, 0.0001);
             let trimStart = 0;
             let trimEnd = audio.length;
-            while (trimStart < audio.length && Math.abs(audio[trimStart]) < TRIM_THRESHOLD) trimStart++;
-            while (trimEnd > trimStart && Math.abs(audio[trimEnd - 1]) < TRIM_THRESHOLD) trimEnd--;
-            // 保留少量 padding (50ms)
-            const pad = Math.round(VAD_SAMPLE_RATE * 0.05);
+            while (trimStart < audio.length && Math.abs(audio[trimStart]) < trimThresh) trimStart++;
+            while (trimEnd > trimStart && Math.abs(audio[trimEnd - 1]) < trimThresh) trimEnd--;
+            // 保留 200ms padding 保护清辅音开头 (p/t/k/s/sh/x/h/f)
+            const pad = Math.round(VAD_SAMPLE_RATE * 0.2);
             trimStart = Math.max(0, trimStart - pad);
             trimEnd = Math.min(audio.length, trimEnd + pad);
             if (trimEnd > trimStart) {
               audio = audio.slice(trimStart, trimEnd);
             }
-            console.log('[VAD] trimmed %d→%d samples (%.2fs→%.2fs)',
-              Math.round(totalSec * VAD_SAMPLE_RATE), audio.length,
-              totalSec, audio.length / VAD_SAMPLE_RATE);
+            console.log('[VAD] trimmed %d→%d samples noiseFloor=%.5f thresh=%.5f',
+              Math.round(totalSec * VAD_SAMPLE_RATE), audio.length, noiseFloor, trimThresh);
             onSpeechEndCb(audio);
           } else {
             console.log('[VAD] speech_too_short (%.2fs < %.2fs), ignoring', totalSec, MIN_SPEECH_SEC);
