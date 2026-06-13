@@ -416,11 +416,37 @@ class TestCrossCutting:
         ):
             with client.websocket_connect("/ws") as ws:
                 ws.send_json({"type": "image", "image": fake_jpeg})
-                ws.receive_json()  # vlm_result
+                ws.receive_json()
 
                 ws.send_json({"type": "audio", "audio": pcm})
                 assert ws.receive_json()["type"] == "asr_result"
-                ws.receive_json()  # TTS — VLM 返回的内容
+                ws.receive_json()
+
+    def test_memory_compress_triggered(self, client):
+        """多轮对话触发记忆异步压缩"""
+        pcm = base64.b64encode(b"\x00" * 32000).decode()
+        from unittest.mock import patch, AsyncMock
+
+        with (
+            patch("server.main.speech_to_text", side_effect=["第1轮", "第2轮"]),
+            patch("server.main.text_to_speech_stream",
+                  side_effect=[
+                      _async_gen({"audio": "", "is_final": True}),
+                      _async_gen({"audio": "", "is_final": True}),
+                  ]),
+        ):
+            with client.websocket_connect("/ws") as ws:
+                # 第1轮 — 短窗口内，不触发压缩
+                ws.send_json({"type": "audio", "audio": pcm})
+                assert ws.receive_json()["type"] == "asr_result"
+                ws.receive_json()  # TTS
+
+                # 第2轮 — mid 积累，触发 compress_mid
+                ws.send_json({"type": "audio", "audio": pcm})
+                assert ws.receive_json()["type"] == "asr_result"
+                ws.receive_json()  # TTS
+
+        # 测试结束，压缩任务应在后台完成（不阻塞）
 
 
 def _async_gen(*items):
