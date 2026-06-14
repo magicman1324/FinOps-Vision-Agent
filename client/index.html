@@ -546,6 +546,15 @@ audio { display: none; }
   transition: opacity 0.2s;
 }
 #login-btn:hover { opacity: 0.85; }
+#switch-account {
+  margin-left: auto;
+  font-size: 11px; color: var(--text-muted);
+  cursor: pointer; user-select: none;
+  padding: 2px 6px; border-radius: 4px;
+  transition: color 0.2s, background 0.2s;
+  flex-shrink: 0;
+}
+#switch-account:hover { color: var(--accent); background: var(--accent-bg); }
 #login-pet-preview {
   margin: 0 auto 12px;
 }
@@ -590,6 +599,7 @@ audio { display: none; }
       <span id="status-text">初始化中...</span>
       <div id="vol-meter"><div id="vol-fill"></div></div>
       <span id="vol-label"></span>
+      <span id="switch-account" title="切换账号">↻ 切换</span>
     </div>
   </div>
   <div id="chat-panel">
@@ -653,6 +663,15 @@ document.getElementById('login-input').addEventListener('keydown', function(e) {
   // 无保存用户名 → 显示登录界面
   document.getElementById('login-overlay').classList.remove('hidden');
 })();
+
+function switchAccount() {
+  localStorage.removeItem('x3_username');
+  _username = '';
+  document.getElementById('login-input').value = '';
+  document.getElementById('login-overlay').classList.remove('hidden');
+  setPetState('idle');
+}
+document.getElementById('switch-account').addEventListener('click', switchAccount);
 
 const camera = document.getElementById('camera');
 const statusDot = document.getElementById('status-dot');
