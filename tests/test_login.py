@@ -46,15 +46,12 @@ class TestLogin:
 
     def test_empty_username_rejected(self, client):
         resp = client.post("/login", json={"username": ""})
-        data = resp.json()
-        assert "error" in data
+        assert resp.status_code == 400
 
     def test_whitespace_only_rejected(self, client):
         resp = client.post("/login", json={"username": "   "})
-        data = resp.json()
-        assert "error" in data
+        assert resp.status_code == 400
 
     def test_long_username_rejected(self, client):
         resp = client.post("/login", json={"username": "a" * 21})
-        data = resp.json()
-        assert "error" in data
+        assert resp.status_code == 400

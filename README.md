@@ -85,11 +85,11 @@ uvicorn server.main:app --host 127.0.0.1 --port 8765
 | 后端 → 前端 | `{"type":"asr_result","text":"..."}` | 语音识别结果 |
 | 后端 → 前端 | `{"type":"text_result","text":"..."}` | AI 文字回复 |
 | 后端 → 前端 | `{"type":"vlm_result","text":"..."}` | 视觉分析结果 |
-| 后端 → 前端 | `{"audio":"<base64>","is_final":false}` | TTS 流式音频块 |
-| 后端 → 前端 | `{"audio":"","is_final":true}` | TTS 播放完成 |
+| 后端 → 前端 | `{"type":"audio","audio":"<base64>","is_final":false}` | TTS 流式音频块 |
+| 后端 → 前端 | `{"type":"audio","audio":"","is_final":true}` | TTS 播放完成 |
 | 后端 → 前端 | `{"type":"error","message":"..."}` | 降级通知 |
 
-> TTS 音频块 **不带 `type` 字段**，仅 `audio` + `is_final`。
+> TTS 音频块带 `type: "audio"`，前端按 `data.type === 'audio'` 分发。
 
 ## 技术栈
 

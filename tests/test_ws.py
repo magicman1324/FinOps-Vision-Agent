@@ -43,7 +43,7 @@ def test_audio_missing_field(client):
         ws.send_json({"type": "audio"})
         data = ws.receive_json()
         assert data["type"] == "error"
-        assert "missing audio" in data["message"]
+        assert "invalid audio" in data["message"]
 
 
 def test_audio_empty_text(client):

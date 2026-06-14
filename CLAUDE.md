@@ -112,7 +112,7 @@ DASHSCOPE_API_KEY=sk-xxx DEEPSEEK_API_KEY=sk-xxx pytest tests/test_live.py -v
 - `tests/conftest.py` 有 `autouse=True` fixture `_mock_llm`，全局 patch `server.main.ask_llm` 返回 `"mock response"`。所有 test 自动启用，防止意外调真实 API
 - 测试如需 mock `ask_llm` 失败路径，再显式 `patch("server.main.ask_llm", side_effect=LLMError(...))` 覆盖
 - L0 router 测试直接调 `classify_intent_l0(text)`，无需 mock
-- TTS chunk 格式 `{"audio":"<base64>","is_final":bool}` — **无 `type` 字段**
+- TTS chunk 格式 `{"type":"audio","audio":"<base64>","is_final":bool}`
 - 异步 generator mock 复用问题：多次调用需用 `side_effect=[gen1, gen2]`，不能用 `return_value`
 
 ### 核心架构模式
@@ -154,8 +154,8 @@ Short 窗口（3 轮完整对话）→ evict 时 raw text 推入 Mid（最多 7 
 后端 → 前端:
   {"type": "asr_result", "text": "用户说的话"}                    ← 带 type 字段
   {"type": "vlm_result", "text": "画面描述"}                      ← 带 type 字段
-  {"audio": "<base64>", "is_final": false}                       ← TTS chunk, 无 type 字段
-  {"audio": "", "is_final": true}                                ← TTS 完成
+  {"type": "audio", "audio": "<base64>", "is_final": false}       ← TTS 流式 chunk
+  {"type": "audio", "audio": "", "is_final": true}               ← TTS 完成
   {"type": "error", "message": "抱歉..."}                        ← 降级通知
   {"type": "echo", "data": {...}}                               ← 未知消息类型回显
 ```

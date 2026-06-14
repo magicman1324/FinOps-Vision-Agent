@@ -19,6 +19,7 @@ async def ask_llm_stream(
     prompt: str,
     system_prompt: str | None = None,
     messages: list[dict] | None = None,
+    trace: str = "-",
 ):
     """流式调用 DeepSeek-V3，逐 chunk yield 文本"""
     all_messages = []
@@ -39,38 +40,43 @@ async def ask_llm_stream(
     }
 
     start = time.monotonic()
-    async with httpx.AsyncClient(timeout=LLM_TIMEOUT, trust_env=False) as client:
-        async with client.stream(
-            "POST",
-            f"{DEEPSEEK_BASE_URL}/chat/completions",
-            headers=headers,
-            json=payload,
-        ) as response:
-            if response.status_code != 200:
-                body = await response.aread()
-                raise LLMError(f"DeepSeek returned {response.status_code}: {body}")
+    try:
+        async with httpx.AsyncClient(timeout=LLM_TIMEOUT, trust_env=False) as client:
+            async with client.stream(
+                "POST",
+                f"{DEEPSEEK_BASE_URL}/chat/completions",
+                headers=headers,
+                json=payload,
+            ) as response:
+                if response.status_code != 200:
+                    body = await response.aread()
+                    raise LLMError(f"DeepSeek returned {response.status_code}: {body}")
 
-            async for line in response.aiter_lines():
-                if line.startswith("data: "):
-                    data = line[6:]
-                    if data == "[DONE]":
-                        break
-                    try:
-                        chunk = json.loads(data)
-                        delta = chunk["choices"][0].get("delta", {})
-                        content = delta.get("content", "")
-                        if content:
-                            yield content
-                    except (json.JSONDecodeError, KeyError, IndexError):
-                        continue
+                async for line in response.aiter_lines():
+                    if line.startswith("data: "):
+                        data = line[6:]
+                        if data == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(data)
+                            delta = chunk["choices"][0].get("delta", {})
+                            content = delta.get("content", "")
+                            if content:
+                                yield content
+                        except (json.JSONDecodeError, KeyError, IndexError):
+                            continue
 
-    elapsed = time.monotonic() - start
-    logger.info("LLM done: elapsed=%.2fs, model=%s", elapsed, DEEPSEEK_MODEL)
+        elapsed = time.monotonic() - start
+        logger.info("LLM done: trace=%s elapsed=%.2fs model=%s", trace, elapsed, DEEPSEEK_MODEL)
+    except Exception:
+        elapsed = time.monotonic() - start
+        logger.error("LLM error: trace=%s elapsed=%.2fs", trace, elapsed)
+        raise
 
 
-async def ask_llm(prompt: str, system_prompt: str | None = None, messages: list[dict] | None = None) -> str:
+async def ask_llm(prompt: str, system_prompt: str | None = None, messages: list[dict] | None = None, trace: str = "-") -> str:
     """非流式汇总，返回完整文本"""
     parts = []
-    async for chunk in ask_llm_stream(prompt, system_prompt=system_prompt, messages=messages):
+    async for chunk in ask_llm_stream(prompt, system_prompt=system_prompt, messages=messages, trace=trace):
         parts.append(chunk)
     return "".join(parts)

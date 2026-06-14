@@ -274,7 +274,7 @@ class TestVisualPipeline:
             ws.send_json({"type": "image"})
             r = ws.receive_json()
             assert r["type"] == "error"
-            assert "missing image" in r["message"]
+            assert "invalid image" in r["message"]
 
     def test_image_vlm_error(self, client):
         fake_jpeg = base64.b64encode(b"fake").decode()

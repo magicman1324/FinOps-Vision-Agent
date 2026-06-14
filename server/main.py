@@ -4,16 +4,16 @@ import asyncio
 import json
 import logging
 import os
+import time
 import uuid
 from contextlib import asynccontextmanager
-from typing import TypedDict
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from server.asr import ASRError, speech_to_text
-from server.db import get_or_create_user, init_db
+from server.db import User, get_or_create_user, init_db
 from server.llm import LLMError, ask_llm
 from server.memory import ConversationMemory
 from server.router import classify_intent_l0
@@ -21,14 +21,16 @@ from server.tts import TTSError, text_to_speech_stream
 from server.vlm import VLMError, image_to_text
 
 
-class AudioMessage(TypedDict):
+class AudioMessage(BaseModel):
     type: str
     audio: str
+    seq: int = 0
 
 
-class ImageMessage(TypedDict):
+class ImageMessage(BaseModel):
     type: str
     image: str
+    prompt: str = "请描述你看到的画面"
 
 
 logging.basicConfig(
@@ -48,18 +50,24 @@ class LoginRequest(BaseModel):
     username: str
 
 
-@app.post("/login")
+class LoginResponse(BaseModel):
+    username: str
+    pet_type: str
+
+
+@app.post("/login", response_model=LoginResponse)
 async def login(req: LoginRequest):
     username = req.username.strip()
     if not username or len(username) > 20:
-        return {"error": "用户名需 1-20 个字符"}
+        raise HTTPException(status_code=400, detail="用户名需 1-20 个字符")
     user = await get_or_create_user(username)
-    logger.info("login user=%s pet=%s", user["username"], user["pet_type"])
+    logger.info("login user=%s pet=%s", user.username, user.pet_type)
     return user
 
 # 每连接状态 (key 是连接 uuid，不用 id(ws) 避免回收碰撞)
-_images: dict[str, str] = {}
+_images: dict[str, tuple[str, float]] = {}  # (base64, timestamp)
 _memories: dict[str, ConversationMemory] = {}
+IMAGE_TTL_SEC = 30
 # 三级降级链最终兜底文案
 FALLBACK_PRESET = "抱歉，我暂时无法处理这个问题，请稍后再试"
 
@@ -105,10 +113,19 @@ async def websocket_endpoint(ws: WebSocket):
             msg_type = data.get("type", "")
 
             if msg_type == "audio":
-                seq = data.get("seq", 0)
-                await _handle_audio(ws, data, trace, seq)
+                try:
+                    msg = AudioMessage(**data)
+                except ValidationError as e:
+                    await ws.send_json({"type": "error", "message": f"invalid audio message: {e}"})
+                    continue
+                await _handle_audio(ws, msg, trace)
             elif msg_type == "image":
-                await _handle_visual(ws, data, trace)
+                try:
+                    msg = ImageMessage(**data)
+                except ValidationError as e:
+                    await ws.send_json({"type": "error", "message": f"invalid image message: {e}"})
+                    continue
+                await _handle_visual(ws, msg, trace)
             else:
                 await ws.send_json({"type": "echo", "data": data})
     except WebSocketDisconnect:
@@ -118,9 +135,9 @@ async def websocket_endpoint(ws: WebSocket):
         _memories.pop(cid, None)
 
 
-async def _handle_audio(ws: WebSocket, data: AudioMessage, trace: str = "-", seq: int = 0):
+async def _handle_audio(ws: WebSocket, msg: AudioMessage, trace: str = "-"):
     """音频: ASR → 意图路由 → 三级降级推理 → TTS → 记忆"""
-    audio_b64 = data.get("audio", "")
+    audio_b64 = msg.audio
     if not audio_b64:
         await ws.send_json({"type": "error", "message": "missing audio field"})
         return
@@ -130,7 +147,7 @@ async def _handle_audio(ws: WebSocket, data: AudioMessage, trace: str = "-", seq
 
     # 1. 语音识别
     try:
-        text = await asyncio.to_thread(speech_to_text, audio_b64)
+        text = await asyncio.to_thread(speech_to_text, audio_b64, trace)
     except ASRError:
         await ws.send_json({"type": "error", "message": "抱歉，我没听清，请再说一次"})
         return
@@ -143,7 +160,14 @@ async def _handle_audio(ws: WebSocket, data: AudioMessage, trace: str = "-", seq
 
     # 2. 意图分类 (L0 正则，22 条视觉关键词覆盖) + 三级降级推理
     intent = classify_intent_l0(text)
-    image = _images.get(_cid(ws))
+    image_entry = _images.get(_cid(ws))
+    image = None
+    if image_entry:
+        b64, ts = image_entry
+        if time.monotonic() - ts < IMAGE_TTL_SEC:
+            image = b64
+        else:
+            _images.pop(_cid(ws), None)
     memory = _get_memory(ws)
 
     logger.info("trace=%s intent=%s has_image=%s turns=%d text=%r",
@@ -170,15 +194,15 @@ async def _handle_audio(ws: WebSocket, data: AudioMessage, trace: str = "-", seq
 
     # 4. TTS 语音合成
     try:
-        async for chunk in text_to_speech_stream(response):
+        async for chunk in text_to_speech_stream(response, trace=trace):
             await ws.send_json(chunk)
     except TTSError:
         await ws.send_json({"type": "error", "message": "抱歉，语音合成失败了"})
 
 
-async def _handle_visual(ws: WebSocket, data: ImageMessage, trace: str = "-"):
+async def _handle_visual(ws: WebSocket, msg: ImageMessage, trace: str = "-"):
     """图片: 缓存最新帧 + VLM 描述"""
-    image_b64 = data.get("image", "")
+    image_b64 = msg.image
     if not image_b64:
         await ws.send_json({"type": "error", "message": "missing image field"})
         return
@@ -186,11 +210,11 @@ async def _handle_visual(ws: WebSocket, data: ImageMessage, trace: str = "-"):
         await ws.send_json({"type": "error", "message": "image payload too large"})
         return
 
-    _images[_cid(ws)] = image_b64
+    _images[_cid(ws)] = (image_b64, time.monotonic())
 
-    prompt = data.get("prompt", "请描述你看到的画面")
+    prompt = msg.prompt
     try:
-        text = await image_to_text(image_b64, prompt)
+        text = await image_to_text(image_b64, prompt, trace=trace)
     except VLMError:
         await ws.send_json({"type": "error", "message": "抱歉，图片分析失败了"})
         return
@@ -213,7 +237,7 @@ async def _cascade_visual(image: str, question: str, memory: ConversationMemory)
     if ctx:
         prompt = f"对话历史:\n{ctx}\n\n{prompt}"
     try:
-        return await image_to_text(image, prompt)
+        return await image_to_text(image, prompt, trace="cascade_v")
     except VLMError:
         logger.warning("VLM failed, cascading to LLM")
 
@@ -226,7 +250,7 @@ async def _cascade_visual(image: str, question: str, memory: ConversationMemory)
         history = memory.get_short_history()
         bg = memory.bg_summary
         system = f"你是一个语音对话助手。{bg}" if bg else None
-        return await ask_llm(llm_prompt, system_prompt=system, messages=history)
+        return await ask_llm(llm_prompt, system_prompt=system, messages=history, trace="cascade_v_l2")
     except LLMError:
         logger.warning("LLM also failed, using preset fallback")
 
@@ -242,7 +266,7 @@ async def _cascade_text(question: str, memory: ConversationMemory) -> str:
 
     # L1: LLM
     try:
-        return await ask_llm(question, system_prompt=system, messages=history)
+        return await ask_llm(question, system_prompt=system, messages=history, trace="cascade_t")
     except LLMError:
         logger.warning("LLM failed, using preset fallback")
 

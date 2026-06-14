@@ -1,8 +1,11 @@
 """应用配置，从环境变量加载"""
 
 import asyncio
+import logging
 import os
 import sys
+
+import dashscope
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -16,6 +19,11 @@ if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY", "")
+if not DASHSCOPE_API_KEY:
+    logging.getLogger("config").warning("DASHSCOPE_API_KEY is empty — ASR/VLM/TTS will fail")
+else:
+    dashscope.api_key = DASHSCOPE_API_KEY
+
 DASHSCOPE_ASR_MODEL = os.getenv("DASHSCOPE_ASR_MODEL", "fun-asr-realtime")
 DASHSCOPE_TTS_MODEL = os.getenv("DASHSCOPE_TTS_MODEL", "cosyvoice-v1")
 DASHSCOPE_VLM_MODEL = os.getenv("DASHSCOPE_VLM_MODEL", "qwen-vl-max")

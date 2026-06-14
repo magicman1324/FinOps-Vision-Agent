@@ -67,7 +67,6 @@ class ConversationMemory:
         from server.llm import ask_llm
 
         async with self._lock:
-            # 双重检查：锁内再次确认状态
             if not self._mid or self._mid_compressed:
                 return
             entries = list(self._mid)
@@ -75,7 +74,7 @@ class ConversationMemory:
             any_compressed = False
             for entry in entries:
                 try:
-                    compressed = await ask_llm(entry, system_prompt=MID_COMPRESS_PROMPT)
+                    compressed = await ask_llm(entry, system_prompt=MID_COMPRESS_PROMPT, trace="compress_mid")
                     new_mid.append(compressed.strip())
                     any_compressed = True
                 except Exception:
@@ -94,7 +93,7 @@ class ConversationMemory:
 
         combined = "\n".join(self._mid)
         try:
-            bg = await ask_llm(combined, system_prompt=BG_COMPRESS_PROMPT)
+            bg = await ask_llm(combined, system_prompt=BG_COMPRESS_PROMPT, trace="compress_bg")
             self._bg = bg.strip()[: self._bg_max]
             logger.info("compress_background done: bg=%r", self._bg[:80])
         except Exception:

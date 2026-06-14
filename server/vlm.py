@@ -7,17 +7,16 @@ import time
 import dashscope
 from dashscope import MultiModalConversation
 
-from server.config import DASHSCOPE_API_KEY, DASHSCOPE_VLM_MODEL, VLM_TIMEOUT
+from server.config import DASHSCOPE_VLM_MODEL, VLM_TIMEOUT
 
 logger = logging.getLogger(__name__)
-dashscope.api_key = DASHSCOPE_API_KEY
 
 
 class VLMError(Exception):
     """VLM 调用失败"""
 
 
-async def image_to_text(image_base64: str, prompt: str = "请描述你看到的画面") -> str:
+async def image_to_text(image_base64: str, prompt: str = "请描述你看到的画面", trace: str = "-") -> str:
     """
     基于图片进行视觉推理，返回文本描述
 
@@ -57,9 +56,12 @@ async def image_to_text(image_base64: str, prompt: str = "请描述你看到的�
     if not choices:
         raise VLMError("VLM returned empty choices")
 
-    text = choices[0].message.content[0].get("text", "")
+    content_list = choices[0].message.content
+    if not content_list:
+        raise VLMError("VLM returned empty content in first choice")
+    text = content_list[0].get("text", "") or ""
     logger.info(
-        "VLM done: text=%r, elapsed=%.2fs, model=%s",
-        text[:100], elapsed, DASHSCOPE_VLM_MODEL,
+        "VLM done: trace=%s text=%r elapsed=%.2fs model=%s",
+        trace, text[:100], elapsed, DASHSCOPE_VLM_MODEL,
     )
     return text

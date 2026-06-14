@@ -9,12 +9,9 @@ import time
 import dashscope
 from dashscope.audio.tts_v2 import AudioFormat, ResultCallback, SpeechSynthesizer
 
-from server.config import DASHSCOPE_API_KEY, DASHSCOPE_TTS_MODEL, TTS_TIMEOUT
+from server.config import DASHSCOPE_TTS_MODEL, TTS_TIMEOUT
 
 logger = logging.getLogger(__name__)
-dashscope.api_key = DASHSCOPE_API_KEY
-
-# config.py 已处理代理清除，此处不重复
 
 
 class TTSError(Exception):
@@ -24,28 +21,29 @@ class TTSError(Exception):
 class _QueueCallback(ResultCallback):
     """将 TTS 回调数据写入 asyncio.Queue"""
 
-    def __init__(self, queue: asyncio.Queue):
+    def __init__(self, queue: asyncio.Queue, trace: str = "-"):
         self._queue = queue
         self._start = time.monotonic()
         self._first = True
+        self._trace = trace
 
     def on_data(self, data: bytes) -> None:
         if self._first:
-            logger.info("TTS first chunk: ttfb=%.3fs", time.monotonic() - self._start)
+            logger.info("TTS first chunk: trace=%s ttfb=%.3fs", self._trace, time.monotonic() - self._start)
             self._first = False
         self._queue.put_nowait(("data", data))
 
     def on_complete(self) -> None:
         self._queue.put_nowait(("done", None))
         logger.info(
-            "TTS done: elapsed=%.2fs", time.monotonic() - self._start
+            "TTS done: trace=%s elapsed=%.2fs", self._trace, time.monotonic() - self._start
         )
 
     def on_error(self, message) -> None:
         self._queue.put_nowait(("error", message))
 
 
-async def text_to_speech_stream(text: str):
+async def text_to_speech_stream(text: str, trace: str = "-"):
     """
     流式文本转语音，逐个 yield Base64 编码的 MP3 chunk
 
@@ -56,7 +54,7 @@ async def text_to_speech_stream(text: str):
         dict: {"audio": "<base64_mp3_chunk>", "is_final": bool}
     """
     queue: asyncio.Queue = asyncio.Queue()
-    callback = _QueueCallback(queue)
+    callback = _QueueCallback(queue, trace)
     synthesizer = SpeechSynthesizer(
         model=DASHSCOPE_TTS_MODEL,
         voice="longxiaochun",

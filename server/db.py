@@ -3,8 +3,15 @@ import aiosqlite
 import os
 import random
 
+from pydantic import BaseModel
+
 DB_PATH = os.path.join(os.path.dirname(__file__), "data.db")
 PETS = ["robot", "cat", "dog", "alien"]
+
+
+class User(BaseModel):
+    username: str
+    pet_type: str
 
 
 async def init_db():
@@ -20,7 +27,7 @@ async def init_db():
         await db.commit()
 
 
-async def get_or_create_user(username: str) -> dict:
+async def get_or_create_user(username: str) -> User:
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
             "SELECT username, pet_type FROM users WHERE username = ?",
@@ -28,7 +35,7 @@ async def get_or_create_user(username: str) -> dict:
         )
         row = await cursor.fetchone()
         if row:
-            return {"username": row[0], "pet_type": row[1]}
+            return User(username=row[0], pet_type=row[1])
 
         pet = random.choice(PETS)
         await db.execute(
@@ -36,4 +43,4 @@ async def get_or_create_user(username: str) -> dict:
             (username, pet),
         )
         await db.commit()
-        return {"username": username, "pet_type": pet}
+        return User(username=username, pet_type=pet)

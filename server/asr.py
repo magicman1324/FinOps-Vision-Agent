@@ -6,28 +6,27 @@ import logging
 import os
 import sys
 import tempfile
+import threading
 import time
 import wave
 
 import dashscope
 from dashscope.audio.asr import Recognition, RecognitionResult
 
-from server.config import DASHSCOPE_API_KEY, DASHSCOPE_ASR_MODEL, ASR_TIMEOUT
+from server.config import DASHSCOPE_ASR_MODEL, ASR_TIMEOUT
 
 logger = logging.getLogger(__name__)
-dashscope.api_key = DASHSCOPE_API_KEY
-
-# config.py 已处理代理清除和事件循环策略，此处不重复
 
 _debug_audio_dir = os.path.join(tempfile.gettempdir(), "xengineer3_debug")
 _debug_save_count = 0
+_debug_save_lock = threading.Lock()
 
 
 class ASRError(Exception):
     """ASR 调用失败"""
 
 
-def speech_to_text(audio_base64: str) -> str:
+def speech_to_text(audio_base64: str, trace: str = "-") -> str:
     """
     将 Base64 编码的 PCM 音频转为文本
 
@@ -42,8 +41,12 @@ def speech_to_text(audio_base64: str) -> str:
     duration = len(audio_bytes) / 32000  # 16kHz 16bit mono = 32000 bytes/s
     logger.info("ASR audio: %d bytes (%.1fs)", len(audio_bytes), duration)
 
-    if _debug_save_count < 10:
-        _debug_save_count += 1
+    with _debug_save_lock:
+        save = _debug_save_count < 10
+        if save:
+            _debug_save_count += 1
+
+    if save:
         os.makedirs(_debug_audio_dir, exist_ok=True)
         ts = int(time.time() * 1000)
         wav_path = os.path.join(_debug_audio_dir, f"asr_{ts}_{len(audio_bytes)}.wav")
@@ -83,5 +86,5 @@ def speech_to_text(audio_base64: str) -> str:
         if isinstance(s, dict) and s.get("text"):
             text += s["text"]
 
-    logger.info("ASR done: text=%r, elapsed=%.2fs", text, elapsed)
+    logger.info("ASR done: trace=%s text=%r, elapsed=%.2fs", trace, text, elapsed)
     return text

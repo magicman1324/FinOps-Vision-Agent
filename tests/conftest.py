@@ -16,7 +16,7 @@ def client():
 @pytest.fixture(autouse=True)
 def _mock_llm():
     """全局 mock ask_llm，覆盖直接引用 (main.py) 和 lazy import (memory.py, router.py)"""
-    async def _mock_ask_llm(prompt, system_prompt=None, messages=None):
+    async def _mock_ask_llm(prompt, system_prompt=None, messages=None, trace="-"):
         return "mock response"
 
     with (
