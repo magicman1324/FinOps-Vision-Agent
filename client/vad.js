@@ -20,6 +20,7 @@ let ringTotalSamples = 0;
 
 let _isRecording = false;
 let _recordStartPos = 0;      // ring buffer 中录音开始位置
+let _recordStartTime = 0;     // 录音开始时间 (performance.now)
 let _recordFrames = 0;
 
 let onSpeechEndCb = null;
@@ -99,6 +100,7 @@ function trimSilence(audio) {
 function startRecording() {
   _isRecording = true;
   _recordStartPos = ringWritePos;
+  _recordStartTime = performance.now();
   _recordFrames = 0;
   ringTotalSamples = 0;
   console.log('[PTT] recording started at pos=' + _recordStartPos);
@@ -111,7 +113,7 @@ function stopRecording() {
   _isRecording = false;
   if (onRecordStateCb) onRecordStateCb(false);
 
-  const durSec = _recordFrames * BUFFER_SIZE / VAD_SAMPLE_RATE;
+  const durSec = (performance.now() - _recordStartTime) / 1000;
   console.log('[PTT] recording stopped dur=%.2fs frames=%d', durSec, _recordFrames);
 
   if (durSec < MIN_SPEECH_SEC) {
