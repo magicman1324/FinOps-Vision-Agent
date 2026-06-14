@@ -81,7 +81,7 @@ DASHSCOPE_API_KEY=sk-xxx DEEPSEEK_API_KEY=sk-xxx pytest tests/test_live.py -v
 - **前端：** 纯 HTML5 + JavaScript，getUserMedia 捕获音视频，RMS 能量 VAD + 环形缓冲区
 - **后端：** Python + FastAPI + WebSocket，全双工通信
 - **AI 引擎：** DashScope ASR（通义听悟 fun-asr-realtime）→ DeepSeek LLM（deepseek-v4-flash）→ Qwen-VL-Max 视觉 → CosyVoice v1 TTS 流式合成（longxiaochun 音色，MP3 16kHz mono 128kbps）
-- **测试：** pytest + pytest-asyncio，asyncio_mode=auto（~121 条用例）
+- **测试：** pytest + pytest-asyncio，asyncio_mode=auto（108 条用例）
 - **CI：** GitHub Actions ubuntu-latest，unit job（每次 push/PR 跑 mock 测试）+ live job（仅 PR，需 DASHSCOPE_API_KEY + DEEPSEEK_API_KEY secret）
 
 ### 架构总览
@@ -90,7 +90,8 @@ DASHSCOPE_API_KEY=sk-xxx DEEPSEEK_API_KEY=sk-xxx pytest tests/test_live.py -v
 浏览器 (index.html)
 ├── vad.js        — RMS VAD + 5s 环形缓冲 + 相对阈值噪音裁剪 + 音量回调
 ├── camera.js     — Canvas 512x512 截图, JPEG q=0.7 → Base64
-└── websocket.js  — WS 通信 + PCM 动态归一化编码（-6dBFS, max 20x gain）+ 指数退避重连 (max 10次)
+├── websocket.js  — WS 通信 + PCM 动态归一化编码（-6dBFS, max 20x gain）+ 指数退避重连 (max 10次)
+└── pet.js        — 像素吉祥物类型 + 状态管理 (4 种宠物, 4 状态)
 
 后端 (server/main.py, FastAPI WebSocket 单端点 /ws + StaticFiles 静态文件 mount)
 ├── asr.py        — DashScope fun-asr-realtime，非流式 call() 解析返回值
@@ -128,14 +129,20 @@ RMS 能量阈值（0.008）+ 单帧触发（SPEECH_FRAMES_MIN=1）检测语音�
 - 静音裁剪：取前 0.3s 估计底噪，阈值 = 3×底噪（min 0.0001），头尾各留 200ms padding 保护清辅音（p/t/k/s/sh/x/h/f）
 - 音量回调：每 5 帧触发 `onVolume(rms)` 驱动 UI 音量条
 
-**L0/L1 双层意图路由** (`server/router.py`)：
-L0 用 22 个中文正则零延迟匹配视觉关键词（"这是什么"、"什么颜色"、空间方位等）。L0 未命中时 L1 用 LLM 二分类兜底（prompt 约束只输出 "visual"/"textual"）。
+**L0 意图路由** (`server/router.py`)：
+L0 用 22 个中文正则零延迟匹配视觉关键词（"这是什么"、"什么颜色"、空间方位等）。未命中返回 "textual"。L1 LLM 二分类已在 PR #32 移除——~1.7s 往返在实时语音场景下是负优化。
 
 **三层语义压缩记忆** (`server/memory.py`)：
 Short 窗口（3 轮完整对话）→ evict 时 raw text 推入 Mid（最多 7 条）→ Mid 超限丢弃最旧。`compress_mid()` 异步 LLM 压缩为结构化摘要，`compress_background()` 将 mid 压缩为 ≤150 字元摘要注入 system prompt。
 
 **三级降级链** (`server/main.py`)：
 视觉问题：`_cascade_visual` L1 VLM → L2 LLM（告知看不到画面，凭常识回答）→ L3 `FALLBACK_PRESET`。文本问题：`_cascade_text` L1 LLM → L2 `FALLBACK_PRESET`。统一兜底文案：`"抱歉，我暂时无法处理这个问题，请稍后再试"`。
+
+**登录与宠物系统** (`server/db.py` + `client/pet.js`)：
+`/login` POST 端点（Pydantic `LoginRequest` 校验 1-20 字符非空白），首次登录随机分配 4 种像素宠物（robot/cat/dog/alien），映射持久化到 SQLite（WAL 模式）。前端 `localStorage` 自动登录，`switchAccount()` 清除状态、断开 WS/VAD、清空播放队列后回到登录界面。4 种宠物共享同一 HTML 结构，通过 CSS 类选择器（`#pet.type-cat .pet-body {...}`）差异化身体颜色、眼睛形状、嘴巴/舌头/耳朵。`setPetState()` 管理 idle/listening/processing/speaking 四种状态动画（浮动/前倾/脉冲/嘴巴开合）。
+
+**输入尺寸限制** (`server/main.py`)：
+`MAX_AUDIO_B64_BYTES = 512 * 1024`（512KB），`MAX_IMAGE_B64_BYTES = 256 * 1024`（256KB）。在 base64 解码前拦截超大消息，防止内存耗尽。
 
 ### WebSocket 消息协议
 
@@ -162,7 +169,7 @@ DASHSCOPE_ASR_MODEL=fun-asr-realtime
 DASHSCOPE_TTS_MODEL=cosyvoice-v1
 DASHSCOPE_VLM_MODEL=qwen-vl-max
 
-# DeepSeek — LLM 文本生成 + 意图分类
+# DeepSeek — LLM 文本生成
 DEEPSEEK_API_KEY=sk-xxx
 DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
 DEEPSEEK_MODEL=deepseek-v4-flash
@@ -172,11 +179,6 @@ ASR_TIMEOUT=10
 VLM_TIMEOUT=15
 LLM_TIMEOUT=10
 TTS_TIMEOUT=10
-
-# 图像压缩
-IMAGE_MAX_WIDTH=512
-IMAGE_MAX_HEIGHT=512
-IMAGE_QUALITY=0.7
 ```
 
 ## 编码规范
