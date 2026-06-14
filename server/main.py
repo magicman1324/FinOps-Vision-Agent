@@ -5,12 +5,15 @@ import json
 import logging
 import os
 import uuid
+from contextlib import asynccontextmanager
 from typing import TypedDict
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 from server.asr import ASRError, speech_to_text
+from server.db import get_or_create_user, init_db
 from server.llm import LLMError, ask_llm
 from server.memory import ConversationMemory
 from server.router import classify_intent_l0
@@ -33,7 +36,26 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="AI Vision Dialogue", version="0.4.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await init_db()
+    logger.info("DB initialized")
+    yield
+
+app = FastAPI(title="AI Vision Dialogue", version="0.5.0", lifespan=lifespan)
+
+class LoginRequest(BaseModel):
+    username: str
+
+
+@app.post("/login")
+async def login(req: LoginRequest):
+    username = req.username.strip()
+    if not username or len(username) > 20:
+        return {"error": "用户名需 1-20 个字符"}
+    user = await get_or_create_user(username)
+    logger.info("login user=%s pet=%s", user["username"], user["pet_type"])
+    return user
 
 # 每连接状态
 _images: dict[int, str] = {}

@@ -195,6 +195,273 @@ audio { display: none; }
   flex-shrink: 0;
 }
 
+/* ---- 像素吉祥物 ---- */
+#pet {
+  width: 64px; height: 100px;
+  margin: 6px auto 2px;
+  position: relative;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+/* 天线杆 */
+.pet-antenna {
+  width: 4px; height: 16px;
+  background: #5b8cce;
+  position: absolute; top: 0; left: 50%;
+  transform: translateX(-50%);
+}
+.pet-antenna::after {
+  content: '';
+  position: absolute; top: -8px; left: 50%;
+  transform: translateX(-50%);
+  width: 10px; height: 10px;
+  background: #ffa726;
+  /* pixel glow: layered box-shadows with 0 blur */
+  box-shadow:
+    0 0 0 2px #5b8cce,
+    0 0 0 4px rgba(255,167,38,0.35);
+}
+/* 身体 — 方块加像素 bevel */
+.pet-body {
+  width: 56px; height: 48px;
+  background: #5b8cce;
+  border-radius: 2px;
+  position: absolute; top: 22px; left: 50%;
+  transform: translateX(-50%);
+  box-shadow:
+    /* 像素 3D 高光 (右上亮，左下暗) */
+    4px 0 0 #7ab8e8,
+    0 4px 0 #3a6dad,
+    4px 4px 0 #2a5080,
+    /* 外轮廓 */
+    0 0 0 2px #1a1a2e;
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+}
+/* 像素眼睛 — 方正白眼 + 方块瞳孔 */
+.pet-eye {
+  width: 12px; height: 14px;
+  background: #fff;
+  border-radius: 1px;
+  position: relative;
+  box-shadow: 0 0 0 2px #1a1a2e;
+}
+.pet-eye::after {
+  content: '';
+  position: absolute; top: 3px; left: 2px;
+  width: 6px; height: 6px;
+  background: #1a1a2e;
+  border-radius: 1px;
+}
+/* 像素嘴巴 */
+.pet-mouth {
+  position: absolute; bottom: 8px; left: 50%;
+  transform: translateX(-50%);
+  width: 16px; height: 4px;
+  background: #1a1a2e;
+  border-radius: 1px;
+}
+
+/* ---- idle: 像素弹跳 + 眨眼 ---- */
+#pet.idle .pet-body {
+  animation: pix-bob 2s steps(4) infinite;
+}
+#pet.idle .pet-eye::after {
+  animation: pix-blink 4s steps(2) infinite;
+}
+
+/* ---- listening: 像素前倾 + 暖色 ---- */
+#pet.listening { transform: rotate(-4deg); }
+#pet.listening .pet-body {
+  background: #e8a840;
+  box-shadow:
+    4px 0 0 #f0c060,
+    0 4px 0 #c08020,
+    4px 4px 0 #906010,
+    0 0 0 2px #1a1a2e;
+}
+#pet.listening .pet-eye { transform: scale(1.15); }
+#pet.listening .pet-antenna { background: #e8a840; }
+#pet.listening .pet-antenna::after {
+  background: #fff;
+  box-shadow:
+    0 0 0 2px #e8a840,
+    0 0 0 5px rgba(255,167,38,0.5);
+  animation: pix-antenna 0.4s steps(2) infinite;
+}
+
+/* ---- processing: 像素抖动 + 瞳孔上翻 ---- */
+#pet.processing .pet-body {
+  animation: pix-processing 0.5s steps(3) infinite;
+}
+#pet.processing .pet-eye::after {
+  top: 1px;
+}
+
+/* ---- speaking: 嘴巴像素开合 + 身体微颤 ---- */
+#pet.speaking .pet-body {
+  animation: pix-vibrate 0.12s steps(2) infinite;
+}
+#pet.speaking .pet-mouth {
+  animation: pix-talk 0.18s steps(2) infinite;
+}
+#pet.speaking .pet-eye {
+  border-radius: 0;
+  clip-path: polygon(0 0, 100% 0, 80% 100%, 20% 100%);
+}
+
+/* ---- 像素 keyframes ---- */
+@keyframes pix-bob {
+  0%, 100% { transform: translateX(-50%) translateY(0); }
+  50% { transform: translateX(-50%) translateY(-4px); }
+}
+@keyframes pix-blink {
+  0%, 90%, 100% { transform: scaleY(1); }
+  95% { transform: scaleY(0); }
+}
+@keyframes pix-antenna {
+  0%, 100% { transform: translateX(-50%) scale(1); }
+  50% { transform: translateX(-50%) scale(1.3); }
+}
+@keyframes pix-processing {
+  0%, 100% { transform: translateX(-50%) scale(1); }
+  33% { transform: translateX(-50%) scale(1.06); }
+  66% { transform: translateX(-50%) scale(0.96); }
+}
+@keyframes pix-vibrate {
+  0%, 100% { transform: translateX(-50%) translateX(0); }
+  50% { transform: translateX(-50%) translateX(2px); }
+}
+@keyframes pix-talk {
+  0%, 100% { height: 4px; width: 16px; }
+  50% { height: 10px; width: 12px; }
+}
+
+/* ---- 猫 (type-cat): 橙色，三角耳，圆眼，W嘴 ---- */
+#pet.type-cat .pet-antenna {
+  width: 0; height: 0;
+  background: transparent;
+  border-left: 8px solid transparent;
+  border-right: 8px solid transparent;
+  border-bottom: 14px solid #e8984a;
+  position: absolute; top: 0; left: 12px;
+}
+#pet.type-cat .pet-antenna::after {
+  content: '';
+  position: absolute; top: 14px; left: -8px;
+  width: 0; height: 0;
+  border-left: 8px solid transparent;
+  border-right: 8px solid transparent;
+  border-bottom: 14px solid #e8984a;
+  background: transparent;
+  box-shadow: none;
+}
+#pet.type-cat .pet-body {
+  background: #e8984a;
+  box-shadow: 4px 0 0 #f0b860, 0 4px 0 #c07020, 4px 4px 0 #905010, 0 0 0 2px #1a1a2e;
+}
+#pet.type-cat .pet-eye { border-radius: 3px; width: 14px; height: 14px; }
+#pet.type-cat .pet-eye::after { border-radius: 3px; width: 7px; height: 7px; }
+#pet.type-cat .pet-mouth { width: 12px; height: 4px; border-radius: 0 0 2px 2px; }
+#pet.type-cat.listening .pet-body {
+  background: #d4883a;
+  box-shadow: 4px 0 0 #e0a040, 0 4px 0 #a06020, 4px 4px 0 #704010, 0 0 0 2px #1a1a2e;
+}
+#pet.type-cat.listening .pet-antenna,
+#pet.type-cat.listening .pet-antenna::after { border-bottom-color: #d4883a; }
+#pet.type-cat.speaking .pet-mouth { animation: pix-talk-cat 0.18s steps(2) infinite; }
+@keyframes pix-talk-cat {
+  0%, 100% { height: 4px; width: 12px; }
+  50% { height: 2px; width: 16px; }
+}
+
+/* ---- 狗 (type-dog): 棕色，垂耳，圆眼，吐舌 ---- */
+#pet.type-dog .pet-antenna {
+  width: 10px; height: 16px;
+  background: #b8845c;
+  border-radius: 5px 5px 2px 2px;
+  position: absolute; top: 2px; left: 14px;
+  transform: rotate(-8deg);
+}
+#pet.type-dog .pet-antenna::after {
+  content: '';
+  position: absolute; top: 2px; left: 22px;
+  width: 10px; height: 16px;
+  background: #b8845c;
+  border-radius: 5px 5px 2px 2px;
+  transform: rotate(16deg);
+  box-shadow: none;
+}
+#pet.type-dog .pet-body {
+  background: #b8845c;
+  box-shadow: 4px 0 0 #d4a878, 0 4px 0 #906030, 4px 4px 0 #684020, 0 0 0 2px #1a1a2e;
+}
+#pet.type-dog .pet-eye { border-radius: 3px; width: 13px; height: 13px; }
+#pet.type-dog .pet-eye::after { border-radius: 3px; width: 6px; height: 6px; }
+#pet.type-dog .pet-mouth { width: 14px; height: 3px; }
+#pet.type-dog .pet-body::after {
+  content: '';
+  position: absolute; bottom: 2px; left: 50%;
+  transform: translateX(-50%);
+  width: 8px; height: 8px;
+  background: #e88888;
+  border-radius: 1px 1px 3px 3px;
+}
+#pet.type-dog.listening .pet-body {
+  background: #a07048;
+  box-shadow: 4px 0 0 #c09060, 0 4px 0 #805020, 4px 4px 0 #583010, 0 0 0 2px #1a1a2e;
+}
+#pet.type-dog.listening .pet-antenna,
+#pet.type-dog.listening .pet-antenna::after { background: #a07048; }
+#pet.type-dog.speaking .pet-mouth { animation: pix-talk-dog 0.18s steps(2) infinite; }
+@keyframes pix-talk-dog {
+  0%, 100% { height: 3px; width: 14px; border-radius: 1px; }
+  50% { height: 8px; width: 10px; border-radius: 1px 1px 4px 4px; }
+}
+
+/* ---- 外星人 (type-alien): 绿色，双细天线，大椭圆眼，小点嘴 ---- */
+#pet.type-alien .pet-antenna {
+  width: 2px; height: 14px;
+  background: #5cb85c;
+  position: absolute; top: 0; left: 20px;
+  transform: rotate(-10deg);
+}
+#pet.type-alien .pet-antenna::after {
+  content: '';
+  position: absolute; top: -8px; left: -2px;
+  width: 6px; height: 6px;
+  background: #5cb85c;
+  border-radius: 1px;
+  box-shadow: 16px 2px 0 #5cb85c;
+}
+#pet.type-alien .pet-body {
+  background: #5cb85c;
+  border-radius: 4px 4px 2px 2px;
+  box-shadow: 4px 0 0 #7cc87c, 0 4px 0 #3a803a, 4px 4px 0 #286028, 0 0 0 2px #1a1a2e;
+  width: 50px; height: 50px;
+}
+#pet.type-alien .pet-eye {
+  width: 16px; height: 18px;
+  border-radius: 4px;
+  box-shadow: 0 0 0 2px #1a1a2e, 0 0 8px rgba(92,184,92,0.6);
+}
+#pet.type-alien .pet-eye::after {
+  width: 10px; height: 10px;
+  border-radius: 3px;
+  top: 4px; left: 3px;
+}
+#pet.type-alien .pet-mouth { width: 6px; height: 6px; border-radius: 1px; }
+#pet.type-alien.listening .pet-body {
+  background: #48a048;
+  box-shadow: 4px 0 0 #68b868, 0 4px 0 #306830, 4px 4px 0 #204820, 0 0 0 2px #1a1a2e;
+}
+#pet.type-alien.listening .pet-antenna,
+#pet.type-alien.listening .pet-antenna::after { background: #48a048; }
+#pet.type-alien.speaking .pet-mouth { animation: pix-talk-alien 0.18s steps(2) infinite; }
+@keyframes pix-talk-alien {
+  0%, 100% { width: 6px; height: 6px; }
+  50% { width: 4px; height: 10px; }
+}
+
 /* 移动端: 堆叠布局 */
 @media (max-width: 840px) {
   #app {
@@ -214,16 +481,110 @@ audio { display: none; }
     max-width: 88%;
     font-size: 14px;
   }
+  #pet {
+    width: 48px; height: 76px;
+  }
+  #pet .pet-body {
+    width: 42px; height: 36px; top: 17px; gap: 7px;
+  }
+  #pet .pet-eye {
+    width: 9px; height: 11px;
+  }
+  #pet .pet-eye::after {
+    width: 5px; height: 5px; top: 2px; left: 2px;
+  }
+  #pet .pet-mouth {
+    width: 12px; height: 3px; bottom: 6px;
+  }
+  #pet .pet-antenna {
+    height: 12px; width: 3px;
+  }
+  #pet .pet-antenna::after {
+    width: 8px; height: 8px; top: -6px;
+  }
 }
+
+/* ---- 登录遮罩 ---- */
+#login-overlay {
+  position: fixed; inset: 0;
+  background: rgba(10,10,30,0.92);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 9999;
+}
+#login-overlay.hidden { display: none; }
+#login-box {
+  background: var(--surface);
+  border: 2px solid var(--accent);
+  border-radius: 12px;
+  padding: 32px 28px 24px;
+  text-align: center;
+  max-width: 340px; width: 90%;
+}
+#login-box h2 {
+  margin: 0 0 6px; font-size: 20px; color: var(--accent);
+}
+#login-box p {
+  margin: 0 0 18px; font-size: 13px; color: var(--text-muted);
+}
+#login-input {
+  width: 100%; padding: 10px 14px;
+  background: #0d1b2a; color: var(--text);
+  border: 2px solid #333;
+  border-radius: 8px;
+  font-size: 15px; outline: none;
+  text-align: center;
+  transition: border-color 0.2s;
+}
+#login-input:focus { border-color: var(--accent); }
+#login-btn {
+  width: 100%; margin-top: 12px; padding: 10px 0;
+  background: var(--accent);
+  color: #1a1a2e;
+  border: none; border-radius: 8px;
+  font-size: 15px; font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+#login-btn:hover { opacity: 0.85; }
+#login-pet-preview {
+  margin: 0 auto 12px;
+}
+
 </style>
 </head>
 <body>
+<div id="login-overlay">
+  <div id="login-box">
+    <h2>AI 视觉对话助手</h2>
+    <div id="login-pet-preview">
+      <div id="pet-preview" class="idle type-robot" style="position:relative;width:64px;height:100px;margin:0 auto">
+        <div class="pet-antenna"></div>
+        <div class="pet-body">
+          <div class="pet-eye eye-l"></div>
+          <div class="pet-eye eye-r"></div>
+          <div class="pet-mouth"></div>
+        </div>
+      </div>
+    </div>
+    <p>输入你的名字，领取专属像素宠物</p>
+    <input id="login-input" type="text" placeholder="你的名字" maxlength="20" autocomplete="off">
+    <button id="login-btn">进入</button>
+  </div>
+</div>
 <div id="app">
   <div id="sidebar">
     <div id="video-container">
       <video id="camera" autoplay playsinline muted></video>
     </div>
     <button id="ptt-btn"><span id="ptt-dot"></span>按住说话</button>
+    <div id="pet" class="idle type-robot">
+      <div class="pet-antenna"></div>
+      <div class="pet-body">
+        <div class="pet-eye eye-l"></div>
+        <div class="pet-eye eye-r"></div>
+        <div class="pet-mouth"></div>
+      </div>
+    </div>
     <div id="status-bar">
       <div id="status-dot" class="idle"></div>
       <span id="status-text">初始化中...</span>
@@ -239,8 +600,60 @@ audio { display: none; }
 
 <script src="vad.js?v=16"></script>
 <script src="camera.js?v=2"></script>
+<script src="pet.js?v=2"></script>
 <script src="websocket.js?v=9"></script>
 <script>
+// ---- 登录流程 ----
+var _username = '';
+
+function doLogin() {
+  var input = document.getElementById('login-input');
+  var name = input.value.trim();
+  if (!name) return;
+
+  fetch('/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: name })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    if (data.error) { alert(data.error); return; }
+    _username = data.username;
+    localStorage.setItem('x3_username', data.username);
+    setPetType(data.pet_type);
+    // 更新登录预览的宠物类型
+    var preview = document.getElementById('pet-preview');
+    if (preview) {
+      preview.className = 'idle type-' + data.pet_type;
+    }
+    document.getElementById('login-overlay').classList.add('hidden');
+    addBubble('你好 ' + data.username + '！你的专属宠物是 ' +
+      {robot:'机器人',cat:'猫咪',dog:'小狗',alien:'外星人'}[data.pet_type], 'system');
+  })
+  .catch(function(err) {
+    console.error('login failed', err);
+    alert('登录失败，请确保后端已启动');
+  });
+}
+
+document.getElementById('login-btn').addEventListener('click', doLogin);
+document.getElementById('login-input').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') doLogin();
+});
+
+// 自动登录：localStorage 有用户名则直接 POST
+(function autoLogin() {
+  var saved = localStorage.getItem('x3_username');
+  if (saved) {
+    document.getElementById('login-input').value = saved;
+    doLogin();
+    return;
+  }
+  // 无保存用户名 → 显示登录界面
+  document.getElementById('login-overlay').classList.remove('hidden');
+})();
+
 const camera = document.getElementById('camera');
 const statusDot = document.getElementById('status-dot');
 const statusText = document.getElementById('status-text');
@@ -255,6 +668,9 @@ const volLabel = document.getElementById('vol-label');
 function setStatus(state, text) {
   statusDot.className = state;
   statusText.textContent = text;
+  if (state === 'listening' || state === 'processing' || state === 'idle') {
+    setPetState(state);
+  }
 }
 
 onVolume(function(rms) {
@@ -324,7 +740,7 @@ function _playNext() {
   if (_currentBlobUrl) URL.revokeObjectURL(_currentBlobUrl);
   _currentBlobUrl = URL.createObjectURL(blob);
   audioPlayer.src = _currentBlobUrl;
-  audioPlayer.onplay = () => setStatus('', '播放中...');
+  audioPlayer.onplay = () => { setStatus('', '播放中...'); setPetState('speaking'); };
   audioPlayer.onended = () => _playNext();
   audioPlayer.play().catch(function() {
     if (_isPlaying) _playNext();

@@ -13,6 +13,9 @@ venv/
 .vscode/
 .idea/
 
+# Database
+*.db
+
 # OS
 .DS_Store
 Thumbs.db
