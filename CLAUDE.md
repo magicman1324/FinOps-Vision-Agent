@@ -94,14 +94,15 @@ DASHSCOPE_API_KEY=sk-xxx DEEPSEEK_API_KEY=sk-xxx pytest tests/test_live.py -v
 
 后端 (server/main.py, FastAPI WebSocket 单端点 /ws + StaticFiles 静态文件 mount)
 ├── asr.py        — DashScope fun-asr-realtime，非流式 call() 解析返回值
-├── router.py     — L0 关键词正则 (22+ patterns) + L1 LLM 二分类兜底
+├── router.py     — L0 关键词正则 (22 patterns) 意图路由
 ├── vlm.py        — Qwen-VL-Max 视觉推理 (asyncio.to_thread 包装同步调用)
 ├── llm.py        — DeepSeek deepseek-v4-flash 流式文本生成 (httpx SSE, trust_env=False)
 ├── tts.py        — CosyVoice v1 流式 TTS (asyncio.Queue 桥接同步回调)
 ├── memory.py     — 三层语义压缩 (short 3轮 → mid 摘要 → bg ≤150字)
+├── db.py         — SQLite 用户-宠物映射 (aiosqlite, WAL 模式)
 └── config.py     — 环境变量 + 代理剥离 + Windows SelectorEventLoop
 
-推理链路: audio → ASR → L0/L1意图路由 → 三级降级链 → TTS流式推送
+推理链路: audio → ASR → L0 意图路由 → 三级降级链 → TTS流式推送
 三级降级: _cascade_visual (VLM→LLM→预设文案) / _cascade_text (LLM→预设文案)
 ```
 
@@ -109,7 +110,7 @@ DASHSCOPE_API_KEY=sk-xxx DEEPSEEK_API_KEY=sk-xxx pytest tests/test_live.py -v
 
 - `tests/conftest.py` 有 `autouse=True` fixture `_mock_llm`，全局 patch `server.main.ask_llm` 返回 `"mock response"`。所有 test 自动启用，防止意外调真实 API
 - 测试如需 mock `ask_llm` 失败路径，再显式 `patch("server.main.ask_llm", side_effect=LLMError(...))` 覆盖
-- L1 router 测试 patch `server.llm.ask_llm`（不是 `server.router.ask_llm`），因为 `ask_llm` 在 `classify_intent_l1` 内部 lazy import
+- L0 router 测试直接调 `classify_intent_l0(text)`，无需 mock
 - TTS chunk 格式 `{"audio":"<base64>","is_final":bool}` — **无 `type` 字段**
 - 异步 generator mock 复用问题：多次调用需用 `side_effect=[gen1, gen2]`，不能用 `return_value`
 

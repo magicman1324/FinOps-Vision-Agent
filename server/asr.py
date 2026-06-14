@@ -20,7 +20,6 @@ dashscope.api_key = DASHSCOPE_API_KEY
 # config.py 已处理代理清除和事件循环策略，此处不重复
 
 _debug_audio_dir = os.path.join(tempfile.gettempdir(), "xengineer3_debug")
-os.makedirs(_debug_audio_dir, exist_ok=True)
 _debug_save_count = 0
 
 
@@ -45,6 +44,7 @@ def speech_to_text(audio_base64: str) -> str:
 
     if _debug_save_count < 10:
         _debug_save_count += 1
+        os.makedirs(_debug_audio_dir, exist_ok=True)
         ts = int(time.time() * 1000)
         wav_path = os.path.join(_debug_audio_dir, f"asr_{ts}_{len(audio_bytes)}.wav")
         with wave.open(wav_path, "wb") as wf:

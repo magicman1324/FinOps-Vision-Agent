@@ -24,10 +24,23 @@ DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
 
-ASR_TIMEOUT = int(os.getenv("ASR_TIMEOUT", "10"))
-VLM_TIMEOUT = int(os.getenv("VLM_TIMEOUT", "15"))
-LLM_TIMEOUT = int(os.getenv("LLM_TIMEOUT", "10"))
-TTS_TIMEOUT = int(os.getenv("TTS_TIMEOUT", "10"))
+def _int_env(key: str, default: int) -> int:
+    """读取整数环境变量，非法值时警告并回退默认"""
+    val = os.getenv(key, str(default))
+    try:
+        return int(val)
+    except ValueError:
+        import logging
+        logging.getLogger("config").warning(
+            "%s=%r is not an integer, falling back to %d", key, val, default
+        )
+        return default
+
+
+ASR_TIMEOUT = _int_env("ASR_TIMEOUT", 10)
+VLM_TIMEOUT = _int_env("VLM_TIMEOUT", 15)
+LLM_TIMEOUT = _int_env("LLM_TIMEOUT", 10)
+TTS_TIMEOUT = _int_env("TTS_TIMEOUT", 10)
 
 # IMAGE_* / VAD_SILENCE_THRESHOLD / WS_MAX_MESSAGE_SIZE 从未被消费，已移除。
 # 图像压缩参数在 client/camera.js，VAD 在 client/vad.js，WS 大小由 uvicorn 控制。

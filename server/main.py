@@ -57,15 +57,22 @@ async def login(req: LoginRequest):
     logger.info("login user=%s pet=%s", user["username"], user["pet_type"])
     return user
 
-# 每连接状态
-_images: dict[int, str] = {}
-_memories: dict[int, ConversationMemory] = {}
+# 每连接状态 (key 是连接 uuid，不用 id(ws) 避免回收碰撞)
+_images: dict[str, str] = {}
+_memories: dict[str, ConversationMemory] = {}
 # 三级降级链最终兜底文案
 FALLBACK_PRESET = "抱歉，我暂时无法处理这个问题，请稍后再试"
 
+# 输入大小限制
+MAX_AUDIO_B64_BYTES = 512 * 1024      # 500KB base64 PCM ≈ 5s 16kHz mono
+MAX_IMAGE_B64_BYTES = 256 * 1024      # 256KB base64 JPEG ≈ 512×512 q=0.7
 
-def _cid(ws: WebSocket) -> int:
-    return id(ws)
+
+def _cid(ws: WebSocket) -> str:
+    """返回该连接的唯一标识，持久存储在 ws 对象上"""
+    if not hasattr(ws, "_x3_cid"):
+        ws._x3_cid = str(uuid.uuid4())[:12]
+    return ws._x3_cid
 
 
 def _get_memory(ws: WebSocket) -> ConversationMemory:
@@ -85,7 +92,7 @@ async def websocket_endpoint(ws: WebSocket):
     await ws.accept()
     cid = _cid(ws)
     trace = str(uuid.uuid4())[:8]
-    logger.info("WebSocket connected cid=%d trace=%s", cid, trace)
+    logger.info("WebSocket connected cid=%s trace=%s", cid, trace)
     try:
         while True:
             raw = await ws.receive_text()
@@ -105,7 +112,7 @@ async def websocket_endpoint(ws: WebSocket):
             else:
                 await ws.send_json({"type": "echo", "data": data})
     except WebSocketDisconnect:
-        logger.info("WebSocket disconnected cid=%d trace=%s", cid, trace)
+        logger.info("WebSocket disconnected cid=%s trace=%s", cid, trace)
     finally:
         _images.pop(cid, None)
         _memories.pop(cid, None)
@@ -116,6 +123,9 @@ async def _handle_audio(ws: WebSocket, data: AudioMessage, trace: str = "-", seq
     audio_b64 = data.get("audio", "")
     if not audio_b64:
         await ws.send_json({"type": "error", "message": "missing audio field"})
+        return
+    if len(audio_b64) > MAX_AUDIO_B64_BYTES:
+        await ws.send_json({"type": "error", "message": "audio payload too large"})
         return
 
     # 1. 语音识别
@@ -171,6 +181,9 @@ async def _handle_visual(ws: WebSocket, data: ImageMessage, trace: str = "-"):
     image_b64 = data.get("image", "")
     if not image_b64:
         await ws.send_json({"type": "error", "message": "missing image field"})
+        return
+    if len(image_b64) > MAX_IMAGE_B64_BYTES:
+        await ws.send_json({"type": "error", "message": "image payload too large"})
         return
 
     _images[_cid(ws)] = image_b64

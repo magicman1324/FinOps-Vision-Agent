@@ -585,7 +585,7 @@ audio { display: none; }
     <div id="video-container">
       <video id="camera" autoplay playsinline muted></video>
     </div>
-    <button id="ptt-btn"><span id="ptt-dot"></span>按住说话</button>
+    <button id="ptt-btn"><span id="ptt-dot"></span><span id="ptt-text">按住说话</span></button>
     <div id="pet" class="idle type-robot">
       <div class="pet-antenna"></div>
       <div class="pet-body">
@@ -670,6 +670,13 @@ function switchAccount() {
   document.getElementById('login-input').value = '';
   document.getElementById('login-overlay').classList.remove('hidden');
   setPetState('idle');
+  // 断开当前连接，停止录音
+  if (typeof disconnect === 'function') disconnect();
+  if (typeof stopVAD === 'function') stopVAD();
+  // 清空播放队列
+  _playQueue = [];
+  _isPlaying = false;
+  if (_currentBlobUrl) { URL.revokeObjectURL(_currentBlobUrl); _currentBlobUrl = null; }
 }
 document.getElementById('switch-account').addEventListener('click', switchAccount);
 
@@ -707,14 +714,14 @@ onVolume(function(rms) {
 
 // 录音状态回显
 onRecordState(function(active) {
+  var pttText = document.getElementById('ptt-text');
   if (active) {
     pttBtn.className = 'recording';
-    pttBtn.innerHTML = '<span id="ptt-dot"></span>松开发送';
-    // 重新获取 ptt-dot 引用 (innerHTML 替换后失效)
+    if (pttText) pttText.textContent = '松开发送';
     setStatus('listening', '录音中...');
   } else {
     pttBtn.className = '';
-    pttBtn.innerHTML = '<span id="ptt-dot"></span>按住说话';
+    if (pttText) pttText.textContent = '按住说话';
     setStatus('processing', '处理中...');
   }
 });

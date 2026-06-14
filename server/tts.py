@@ -81,5 +81,3 @@ async def text_to_speech_stream(text: str):
                 yield {"type": "audio", "audio": audio_b64, "is_final": False}
     except asyncio.TimeoutError:
         raise TTSError(f"TTS timeout after {TTS_TIMEOUT}s")
-    except Exception:
-        raise

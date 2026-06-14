@@ -1,4 +1,4 @@
-"""双层意图路由 — L0 关键词正则 + L1 LLM 二分类兜底"""
+"""L0 关键词正则意图路由 — 22 条视觉关键词模式"""
 
 import re
 import logging
@@ -33,11 +33,6 @@ VISUAL_PATTERNS = [
     r"[长是]什么样[子]?", r"外观",
 ]
 
-L1_SYSTEM_PROMPT = (
-    "你是一个意图分类器。判断用户的问题是否需要借助视觉（看到画面/图片/摄像头）才能回答。"
-    "只需要回复 'visual' 或 'textual'，不要解释，不要标点，不要其他内容。"
-)
-
 
 def classify_intent_l0(text: str) -> str:
     """L0 关键词路由：正则匹配，零延迟零成本"""
@@ -50,20 +45,4 @@ def classify_intent_l0(text: str) -> str:
             return "visual"
 
     return "textual"
-
-
-async def classify_intent_l1(text: str) -> str:
-    """L1 LLM 二分类：当 L0 未命中时，用 DeepSeek-V3 兜底"""
-    from server.llm import ask_llm
-
-    raw = await ask_llm(text, system_prompt=L1_SYSTEM_PROMPT)
-    cleaned = raw.strip().lower()
-
-    if "visual" in cleaned:
-        logger.info("L1 → visual: text=%r", text[:80])
-        return "visual"
-
-    logger.debug("L1 → textual: text=%r", text[:80])
-    return "textual"
-
 

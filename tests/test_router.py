@@ -1,11 +1,8 @@
-"""测试双层意图路由 — L0 关键词 + L1 LLM 二分类"""
-
-import asyncio
-from unittest.mock import AsyncMock, patch
+"""测试 L0 关键词正则意图路由 — 22 条视觉关键词模式"""
 
 import pytest
 
-from server.router import classify_intent_l0, classify_intent_l1
+from server.router import classify_intent_l0
 
 
 class TestL0VisualHits:
@@ -88,35 +85,5 @@ class TestL0EdgeCases:
 
     def test_english_visual(self):
         assert classify_intent_l0("what is this") == "textual"
-
-
-class TestL1LLMClassification:
-    """L1 LLM 二分类"""
-
-    def test_returns_visual_when_llm_says_visual(self):
-        with patch("server.llm.ask_llm", new=AsyncMock(return_value="visual")):
-            result = asyncio.run(classify_intent_l1("我手里这东西贵吗"))
-            assert result == "visual"
-
-    def test_returns_textual_when_llm_says_textual(self):
-        with patch("server.llm.ask_llm", new=AsyncMock(return_value="textual")):
-            result = asyncio.run(classify_intent_l1("今天天气怎么样"))
-            assert result == "textual"
-
-    def test_handles_llm_with_extra_whitespace(self):
-        with patch("server.llm.ask_llm", new=AsyncMock(return_value="  visual  ")):
-            result = asyncio.run(classify_intent_l1("这是啥"))
-            assert result == "visual"
-
-    def test_handles_llm_with_punctuation(self):
-        with patch("server.llm.ask_llm", new=AsyncMock(return_value="visual。")):
-            result = asyncio.run(classify_intent_l1("这什么东西"))
-            assert result == "visual"
-
-    def test_boundary_sentence_visual(self):
-        # 边界句：口语化视觉提问，L0 可能漏
-        with patch("server.llm.ask_llm", new=AsyncMock(return_value="visual")):
-            result = asyncio.run(classify_intent_l1("诶这东西看着挺贵"))
-            assert result == "visual"
 
 
