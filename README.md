@@ -50,7 +50,8 @@ uvicorn server.main:app --host 127.0.0.1 --port 8765
 浏览器 (HTML5 + JS)
 ├── vad.js          RMS 环形缓冲区 + 噪音裁剪
 ├── camera.js       Canvas 512×512 JPEG 截图
-└── websocket.js    WS 通信 + PCM 动态归一化 + 指数退避重连
+├── websocket.js    WS 通信 + PCM 动态归一化 + 指数退避重连
+└── pet.js          像素吉祥物 (4 种宠物 × 4 状态)
 
 ↕ WebSocket (全双工)
 
@@ -61,7 +62,8 @@ uvicorn server.main:app --host 127.0.0.1 --port 8765
 ├── vlm.py          Qwen-VL-Max 视觉推理
 ├── tts.py          CosyVoice 流式语音合成
 ├── memory.py       三层语义压缩记忆
-└── main.py         WebSocket 端点 + 三级降级链
+├── db.py           SQLite 用户-宠物映射
+└── main.py         WebSocket 端点 + 三级降级链 + 输入限制
 ```
 
 **推理链路：** `audio → ASR → L0 意图路由 → VLM/LLM → 记忆 → TTS → 语音播放`
@@ -69,6 +71,10 @@ uvicorn server.main:app --host 127.0.0.1 --port 8765
 **三级降级：** VLM 失败 → LLM 兜底 → 预设文案。每层独立 catch，永不崩溃。
 
 **三层记忆：** 短窗口（3 轮精确对话）→ 中距摘要（7 条压缩）→ 背景元摘要（≤150 字）。异步 LLM 压缩，不阻塞主链路。
+
+**像素宠物 + 登录：** 首次登录随机分配 4 种像素宠物（机器人/猫/狗/外星人），纯 CSS 像素风绘制，随应用状态切换动画（idle/listening/processing/speaking）。用户名持久化 SQLite（WAL），刷新自动登录，支持切换账号。
+
+**输入防护：** 音频消息 ≤512KB、图片消息 ≤256KB，base64 解码前拦截，防止内存耗尽。
 
 ## WebSocket 消息协议
 
@@ -147,12 +153,14 @@ XEngineer3/
 │   ├── tts.py          语音合成（CosyVoice，流式回调→生成器桥接）
 │   ├── memory.py       三层语义压缩记忆
 │   ├── router.py       L0 关键词正则意图路由
+│   ├── db.py           SQLite 用户-宠物映射 (aiosqlite, WAL)
 │   └── config.py       环境变量 + 代理清除
 ├── client/
 │   ├── index.html      主页面 + UI 编排
 │   ├── vad.js          音频采集 + 环形缓冲 + 噪音裁剪
 │   ├── camera.js       截图（512×512 JPEG）
-│   └── websocket.js    WebSocket + PCM 编码 + 重连
+│   ├── websocket.js    WebSocket + PCM 编码 + 重连
+│   └── pet.js          像素吉祥物类型 + 状态管理
 ├── tests/
 │   ├── test_cascade.py     三级降级链测试
 │   ├── test_integration.py 音频全链路集成测试
@@ -164,6 +172,7 @@ XEngineer3/
 │   ├── test_vlm.py         VLM 模块测试
 │   ├── test_asr.py         ASR 模块测试
 │   ├── test_tts.py         TTS 模块测试
+│   ├── test_login.py       登录 + 宠物分配测试
 │   └── conftest.py         mock 夹具
 ├── 总结X.md            前两次选拔深度归纳
 ├── 总结3.md            本次架构评审
